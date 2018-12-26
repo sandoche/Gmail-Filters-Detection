@@ -1,0 +1,52 @@
+function buildAddOn(e) {
+  // Activate temporary Gmail add-on scopes.
+  var filters = Gmail.Users.Settings.Filters.list('me');
+  
+  var accessToken = e.messageMetadata.accessToken;
+  GmailApp.setCurrentMessageAccessToken(accessToken);
+
+  var messageId = e.messageMetadata.messageId;
+  var message = GmailApp.getMessageById(messageId);
+  var body = message.getBody()
+  
+  var sectionSelected = CardService.newCardSection()
+    .setHeader("<font color=\"#1257e0\"><b>Applicable filters</b></font>");       
+
+  var sectionUnselected = CardService.newCardSection()
+    .setHeader("<font color=\"#1257e0\"><b>Unapplicable filters</b></font>");     
+  
+  var checkboxGroupSelected = CardService.newSelectionInput()
+    .setType(CardService.SelectionInputType.CHECK_BOX)
+    .setFieldName('labels');
+
+  var checkboxGroupUnselected = CardService.newSelectionInput()
+    .setType(CardService.SelectionInputType.CHECK_BOX)
+    .setFieldName('labels');  
+  
+  for(var i = 0; i < filters.filter.length; i++) {
+    var query = filters.filter[i].criteria.query;
+    if (query && doesTextContainsString(body, query)) {
+      checkboxGroupSelected.addItem(query, query, doesTextContainsString(body, query));
+    }
+    else if (query && !doesTextContainsString(body, query)) {
+      checkboxGroupUnselected.addItem(query, query, doesTextContainsString(body, query));
+    }
+  }
+  
+  sectionSelected.addWidget(checkboxGroupSelected);
+  sectionUnselected.addWidget(checkboxGroupUnselected);
+  
+  var card = CardService.newCardBuilder()
+    .setHeader(CardService.newCardHeader()
+    .setTitle('Filters')
+    .setImageUrl('https://www.gstatic.com/images/icons/material/system/1x/label_googblue_48dp.png'))
+    .addSection(sectionSelected) 
+    .addSection(sectionUnselected)   
+    .build();
+
+  return [card];
+} 
+
+function doesTextContainsString(text, string) {
+  return text.indexOf(string) > -1
+}
