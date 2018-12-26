@@ -23,13 +23,18 @@ function buildAddOn(e) {
     .setType(CardService.SelectionInputType.CHECK_BOX)
     .setFieldName('labels');  
   
+  var countSelected = 0;
+  var countUnselected = 0;
+  
   for(var i = 0; i < filters.filter.length; i++) {
     var query = filters.filter[i].criteria.query;
     if (query && doesTextContainsString(body, query)) {
       checkboxGroupSelected.addItem(query, query, doesTextContainsString(body, query));
+      countSelected++;
     }
     else if (query && !doesTextContainsString(body, query)) {
       checkboxGroupUnselected.addItem(query, query, doesTextContainsString(body, query));
+      countUnselected++;
     }
   }
   
@@ -39,10 +44,17 @@ function buildAddOn(e) {
   var card = CardService.newCardBuilder()
     .setHeader(CardService.newCardHeader()
     .setTitle('Filters')
-    .setImageUrl('https://www.gstatic.com/images/icons/material/system/1x/label_googblue_48dp.png'))
-    .addSection(sectionSelected) 
-    .addSection(sectionUnselected)   
-    .build();
+    .setImageUrl('https://www.gstatic.com/images/icons/material/system/1x/label_googblue_48dp.png'));
+  
+  if (countSelected > 0) {
+    card = card.addSection(sectionSelected) 
+  }
+  
+  if (countUnselected > 0) {
+    card = card.addSection(sectionUnselected) 
+  }
+  
+  card = card.build();
 
   return [card];
 } 
