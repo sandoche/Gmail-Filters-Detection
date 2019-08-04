@@ -10,24 +10,31 @@ function buildAddOn(e) {
   var body = message.getBody()
   
   var sectionSelected = CardService.newCardSection()
-    .setHeader("<font color=\"#1257e0\"><b>Applicable filters</b></font>");       
+    .setHeader("<font color=\"#ea545b\"><b>Applicable Filters</b></font>");       
 
   var sectionUnselected = CardService.newCardSection()
-    .setHeader("<font color=\"#1257e0\"><b>Unapplicable filters</b></font>");     
+    .setHeader("<font color=\"#3DA80B\"><b>Unapplicable Filters</b></font>");     
   
   var checkboxGroupSelected = CardService.newSelectionInput()
     .setType(CardService.SelectionInputType.CHECK_BOX)
-    .setFieldName('labels');
+    .setFieldName('labelsselected');
 
   var checkboxGroupUnselected = CardService.newSelectionInput()
     .setType(CardService.SelectionInputType.CHECK_BOX)
-    .setFieldName('labels');  
+    .setFieldName('labelsunselected');  
   
   var countSelected = 0;
   var countUnselected = 0;
   
   for(var i = 0; i < filters.filter.length; i++) {
     var query = filters.filter[i].criteria.query;
+    var regex = new RegExp('"(.*)"', 'gi');
+    var reg = regex.exec(query)
+    Logger.log(query + ' ' + reg);
+    if(reg) {
+      query = reg[1]
+    }
+    
     if (query && doesTextContainsString(body, query)) {
       checkboxGroupSelected.addItem(query, query, doesTextContainsString(body, query));
       countSelected++;
@@ -43,8 +50,8 @@ function buildAddOn(e) {
   
   var card = CardService.newCardBuilder()
     .setHeader(CardService.newCardHeader()
-    .setTitle('Filters')
-    .setImageUrl('https://www.gstatic.com/images/icons/material/system/1x/label_googblue_48dp.png'));
+    .setTitle('Gmail Why Filters')
+    .setImageUrl('http://images2.imagebam.com/f9/88/37/acf1091058702334.png'));
   
   if (countSelected > 0) {
     card = card.addSection(sectionSelected) 
@@ -60,5 +67,5 @@ function buildAddOn(e) {
 } 
 
 function doesTextContainsString(text, string) {
-  return text.toLowerCase().indexOf(string.toLowerCase()) > -1
+ return text.toLowerCase().indexOf(string.toLowerCase()) > -1
 }
