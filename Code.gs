@@ -60,5 +60,5 @@ function buildAddOn(e) {
 } 
 
 function doesTextContainsString(text, string) {
-  return text.indexOf(string) > -1
+  return text.toLowerCase().indexOf(string.toLowerCase()) > -1
 }
