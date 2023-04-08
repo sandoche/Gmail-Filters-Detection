@@ -37,6 +37,9 @@ function buildAddOn(e) {
   
   var countSelected = 0;
   var countUnselected = 0;
+
+  var queriesSelected = []
+  var queriesUnselected = []
   
   for(var i = 0; i < filters.filter.length; i++) {
     var query = filters.filter[i].criteria.query;
@@ -48,14 +51,20 @@ function buildAddOn(e) {
     }
     
     if (query && doesTextContainsString(body, query)) {
-      checkboxGroupSelected.addItem(query, query, doesTextContainsString(body, query));
+      queriesSelected.push(query)
       countSelected++;
     }
     else if (query && !doesTextContainsString(body, query)) {
-      checkboxGroupUnselected.addItem(query, query, doesTextContainsString(body, query));
+      queriesUnselected.push(query)
       countUnselected++;
     }
   }
+
+  var queriesSelectedSorted = sortAlphabetically(queriesSelected)
+  var queriesUnselectedSorted = sortAlphabetically(queriesUnselected)
+
+  checkboxGroupSelected = addItemsToCheckboxGroup(checkboxGroupSelected, queriesSelectedSorted, body)
+  checkboxGroupUnselected = addItemsToCheckboxGroup(checkboxGroupUnselected, queriesUnselectedSorted, body)
   
   sectionSelected.addWidget(checkboxGroupSelected);
   sectionUnselected.addWidget(checkboxGroupUnselected);
@@ -81,3 +90,19 @@ function buildAddOn(e) {
 function doesTextContainsString(text, string) {
  return text.toLowerCase().indexOf(string.toLowerCase()) > -1
 }
+
+function sortAlphabetically(arr) {
+  return arr.sort(function(a, b) {
+    return a.localeCompare(b);
+  });
+}
+
+function addItemsToCheckboxGroup(checkboxGroup, queries, body) {
+  for(var i = 0; i < queries.length; i++) {
+    var query = queries[i]
+    checkboxGroup.addItem(query, query, doesTextContainsString(body, query));
+  }
+
+  return checkboxGroup
+}
+
