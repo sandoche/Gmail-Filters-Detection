@@ -1,7 +1,19 @@
 function buildAddOn(e) {
-  // Activate temporary Gmail add-on scopes.
-  var filters = Gmail.Users.Settings.Filters.list('me');
-  
+  // Vérifier si les données sont en cache
+  var cache = CacheService.getScriptCache();
+  var cacheKey = 'filtersData'; // Clé pour stocker les données en cache
+  var cachedData = cache.get(cacheKey);
+
+  if (cachedData) {
+    // Utiliser les données en cache si disponibles
+    var filters = JSON.parse(cachedData);
+  } else {
+    // Si les données ne sont pas en cache, les récupérer via l'API
+    filters = Gmail.Users.Settings.Filters.list('me');
+    // Stocker les données en cache pour une utilisation ultérieure
+    cache.put(cacheKey, JSON.stringify(filters), 3600); // 1 heure de durée de vie du cache (en secondes)
+  }
+
   var accessToken = e.messageMetadata.accessToken;
   GmailApp.setCurrentMessageAccessToken(accessToken);
 
