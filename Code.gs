@@ -1,108 +1,295 @@
-function buildAddOn(e) {
-  // Vérifier si les données sont en cache
+var cachedFilters = null; // Variable pour stocker les filtres en cache
+
+function getCachedFilters() {
+  if (cachedFilters === null) {
+    cachedFilters = Gmail.Users.Settings.Filters.list('me').filter;
+  }
+  return cachedFilters;
+}
+
+function clearCache() {
   var cache = CacheService.getScriptCache();
-  var cacheKey = 'filtersData'; // Clé pour stocker les données en cache
-  var cachedData = cache.get(cacheKey);
+  cache.removeAll(); // Cette ligne vide tout le cache
+}
 
-  if (cachedData) {
-    // Utiliser les données en cache si disponibles
-    var filters = JSON.parse(cachedData);
-  } else {
-    // Si les données ne sont pas en cache, les récupérer via l'API
-    filters = Gmail.Users.Settings.Filters.list('me');
-    // Stocker les données en cache pour une utilisation ultérieure
-    cache.put(cacheKey, JSON.stringify(filters), 3600); // 1 heure de durée de vie du cache (en secondes)
-  }
+function buildAddOn(e) {
+  var messageId = e.gmail.messageId; // Récupère l'ID du mail actuel
 
-  var accessToken = e.messageMetadata.accessToken;
-  GmailApp.setCurrentMessageAccessToken(accessToken);
+  var cardSection = CardService.newCardSection();
 
-  var messageId = e.messageMetadata.messageId;
-  var message = GmailApp.getMessageById(messageId);
-  var body = message.getBody()
-  
-  var sectionSelected = CardService.newCardSection()
-    .setHeader("<font color=\"#ea545b\"><b>Applicable Filters</b></font>");       
+  var emailIdText = CardService.newTextParagraph()
+    .setText('<b>' + messageId + '</b>');
 
-  var sectionUnselected = CardService.newCardSection()
-    .setHeader("<font color=\"#3DA80B\"><b>Unapplicable Filters</b></font>");     
-  
-  var checkboxGroupSelected = CardService.newSelectionInput()
-    .setType(CardService.SelectionInputType.CHECK_BOX)
-    .setFieldName('labelsselected');
+  cardSection.addWidget(emailIdText);
 
-  var checkboxGroupUnselected = CardService.newSelectionInput()
-    .setType(CardService.SelectionInputType.CHECK_BOX)
-    .setFieldName('labelsunselected');  
-  
-  var countSelected = 0;
-  var countUnselected = 0;
+  var showApplicableButton = CardService.newTextButton()
+    .setText('Which Filters are Applicable ?')
+    .setOnClickAction(CardService.newAction().setFunctionName('showApplicableFilters')
+    .setParameters({'idmail': messageId}));
 
-  var queriesSelected = []
-  var queriesUnselected = []
-  
-  for(var i = 0; i < filters.filter.length; i++) {
-    var query = filters.filter[i].criteria.query;
-    var regex = new RegExp('"(.*)"', 'gi');
-    var reg = regex.exec(query)
-    Logger.log(query + ' ' + reg);
-    if(reg) {
-      query = reg[1]
-    }
-    
-    if (query && doesTextContainsString(body, query)) {
-      queriesSelected.push(query)
-      countSelected++;
-    }
-    else if (query && !doesTextContainsString(body, query)) {
-      queriesUnselected.push(query)
-      countUnselected++;
-    }
-  }
+  cardSection.addWidget(showApplicableButton);
 
-  var queriesSelectedSorted = sortAlphabetically(queriesSelected)
-  var queriesUnselectedSorted = sortAlphabetically(queriesUnselected)
-
-  checkboxGroupSelected = addItemsToCheckboxGroup(checkboxGroupSelected, queriesSelectedSorted, body)
-  checkboxGroupUnselected = addItemsToCheckboxGroup(checkboxGroupUnselected, queriesUnselectedSorted, body)
-  
-  sectionSelected.addWidget(checkboxGroupSelected);
-  sectionUnselected.addWidget(checkboxGroupUnselected);
-  
   var card = CardService.newCardBuilder()
-    .setHeader(CardService.newCardHeader()
-    .setTitle('Gmail Why Filters')
-    .setImageUrl('http://images2.imagebam.com/f9/88/37/acf1091058702334.png'));
-  
-  if (countSelected > 0) {
-    card = card.addSection(sectionSelected) 
-  }
-  
-  if (countUnselected > 0) {
-    card = card.addSection(sectionUnselected) 
-  }
-  
-  card = card.build();
+    .addSection(cardSection)
+    .build();
 
-  return [card];
-} 
-
-function doesTextContainsString(text, string) {
- return text.toLowerCase().indexOf(string.toLowerCase()) > -1
+  return card;
 }
 
-function sortAlphabetically(arr) {
-  return arr.sort(function(a, b) {
-    return a.localeCompare(b);
-  });
-}
+function showApplicableFilters(e) {
+  var idmail = e.parameters.idmail;
+  var applicableFilters = whyThisMail(idmail);
 
-function addItemsToCheckboxGroup(checkboxGroup, queries, body) {
-  for(var i = 0; i < queries.length; i++) {
-    var query = queries[i]
-    checkboxGroup.addItem(query, query, doesTextContainsString(body, query));
+  var cardSection = CardService.newCardSection();
+
+  var messageIdText = CardService.newTextParagraph()
+    .setText(idmail);
+
+  cardSection.addWidget(messageIdText);
+
+  var applicableFiltersText = '';
+  if (applicableFilters.length > 0) {
+    applicableFilters.forEach(filter => {
+      applicableFiltersText += filter + '\n';
+    });
+  } else {
+    applicableFiltersText = 'No Applicable Filters.';
   }
 
-  return checkboxGroup
+  var filtersText = CardService.newTextParagraph()
+    .setText(applicableFiltersText);
+
+  cardSection.addWidget(filtersText);
+
+  var card = CardService.newCardBuilder()
+    .addSection(cardSection)
+    .build();
+
+  return card;
 }
 
+
+function whyThisMail(idmail) {
+  var message = GmailApp.getMessageById(idmail);
+  var body = message.getPlainBody();
+  var filters = getCachedFilters();
+
+  var applicableFilters = [];
+
+  for (var i = 0; i < filters.length; i++) {
+    var filter = filters[i];
+    var criteria = filter.criteria;
+
+    if (criteria && criteria.query) {
+      var criterialean = criteria.query.replace(/"/g, "");
+      var queryApplicable = doesTextContainsString(criterialean, body);
+
+      if (queryApplicable) {
+        applicableFilters.push(criterialean);
+      }
+    }
+  }
+
+  applicableFilters.sort();
+
+  return applicableFilters;
+}
+
+
+function getFilteredFiltersHtml(idmail, isApplicable) {
+  var message = GmailApp.getMessageById(idmail);
+  var body = message.getPlainBody();
+  var filters = getCachedFilters();
+
+  var filtersHtml = '';
+  for (var i = 0; i < filters.length; i++) {
+    var filter = filters[i];
+    var criteria = filter.criteria;
+
+    if (criteria && criteria.query) {
+      var criterialean = criteria.query.replace(/"/g, "");
+      var queryApplicable = doesTextContainsString(criterialean, body);
+
+      if ((isApplicable && queryApplicable) || (!isApplicable && !queryApplicable)) {
+        filtersHtml += '<div>[ ] ' + criterialean + '</div>';
+      }
+    }
+  }
+
+  return filtersHtml;
+}
+
+
+function checkFilters() {
+  var messageId = getCurrentMessageId();
+  if (messageId) {
+    whyThisMail(messageId);
+  }
+}
+
+function getFilters() {
+  var filters = Gmail.Users.Settings.Filters.list('me').filter;
+
+  if (filters.length > 0) {
+    for (var i = 0; i < filters.length; i++) {
+      var filter = filters[i];
+      //Logger.log('Filter ID: ' + filter.id);
+
+      if (filter.criteria.query) {
+        //Logger.log('Correspondance: ' + filter.criteria.query);
+      } else {
+        //Logger.log('No "Correspondance" specified for this filter.');
+      }
+
+      if (filter.action.addLabelIds) {
+        var labelNames = getLabelNames(filter.action.addLabelIds);
+        //Logger.log('Applied Label Names: ' + labelNames);
+      } else {
+        //Logger.log('No label applied for this filter.');
+      }
+
+      //Logger.log('------------------'); // Separate entries for clarity
+    }
+  } else {
+    //Logger.log('Aucun filtre trouvé dans le compte.');
+  }
+}
+
+function getLabelNames(labelIds) {
+  var labelNames = [];
+  for (var i = 0; i < labelIds.length; i++) {
+    var label = Gmail.Users.Labels.get('me', labelIds[i]);
+    if (label) {
+      labelNames.push(label.name);
+    }
+  }
+  return labelNames.join(', ');
+}
+
+function getCurrentMessageId() {
+  var currentMessage = GmailApp.getCurrentMessage();
+  if (currentMessage) {
+    return currentMessage.getId();
+  }
+  return null;
+}
+
+function GSCRIPTwhyThisMail() {
+  var idmail = 'msg-f:1773829072373142234';
+  var message = GmailApp.getMessageById(idmail);
+  var body = GmailApp.getMessageById(idmail).getPlainBody();
+  var filters = getCachedFilters();
+
+  Logger.log('Email ID : ' + idmail);
+  Logger.log(body)
+
+  var applicableFiltersCount = 0; // Initialize the count of applicable filters
+
+  for (var i = 0; i < filters.length; i++) {
+    var filter = filters[i];
+    var criteria = filter.criteria;
+
+    if (criteria && criteria.query) {
+      var criterialean = criteria.query.replace(/"/g, "");
+      var fromApplicable = !criteria.from || doesTextContainsString(body, criteria.from);
+      var subjectApplicable = !criteria.subject || doesTextContainsString(body, criteria.subject);
+      var queryApplicable = doesTextContainsString(criterialean, body);
+
+      //Logger.log(criterialean,body)
+
+      if (fromApplicable && subjectApplicable && queryApplicable) {
+        var appliedLabelNames = getLabelNames(filter.action.addLabelIds);
+        Logger.log('Correspondance: ' + criterialean + '\n' + 'Applied Label: ' + appliedLabelNames);
+        applicableFiltersCount++; // Increment the count of applicable filters
+      }
+    }
+  }
+
+  if (applicableFiltersCount > 0) {
+    Logger.log(applicableFiltersCount + ' Applicable Filters:');
+  } else {
+    Logger.log('No Applicable filters');
+  }
+}
+
+function checkApplicableFilterForMail(idmail) {
+  var message = GmailApp.getMessageById(idmail);
+  var filters = getCachedFilters();
+
+  for (var i = 0; i < filters.length; i++) {
+    var filter = filters[i];
+    var criteria = filter.criteria;
+
+    if (criteria) {
+      var fromApplicable = isFilterApplicable(criteria.from, message.getFrom());
+      var toApplicable = isFilterApplicable(criteria.to, message.getTo());
+      var subjectApplicable = isFilterApplicable(criteria.subject, message.getSubject());
+
+      if (fromApplicable && toApplicable && subjectApplicable) {
+        return {
+          isApplicable: true,
+          filterId: filter.id,
+          filterCriteria: JSON.stringify(criteria),
+          appliedLabelNames: getLabelNames(filter.action.addLabelIds)
+        };
+      }
+    }
+  }
+
+  return {
+    isApplicable: false
+  };
+}
+
+function isFilterApplicable(filterValue, messageValue) {
+  if (!filterValue) {
+    return true; // No filter value specified, so it's applicable
+  }
+
+  var filterWords = filterValue.toLowerCase().split(' ');
+  var messageWords = messageValue.toLowerCase().split(' ');
+
+  return filterWords.every(word => messageWords.includes(word));
+}
+
+
+function GSCRIPTWhyThisMailCheck() {
+  //var idmail = 'msg-f:1773829072373142234';
+  var idmail = 'msg-f:1773836771915066428';
+  var filterResult = checkApplicableFilterForMail(idmail);
+
+  if (filterResult.isApplicable) {
+    Logger.log('Applicable Filters for : ' + idmail );
+    Logger.log('Criteria: ' + filterResult.filterCriteria + '\n' + 'Applied Labels: ' + filterResult.appliedLabelNames);
+  } else {
+    Logger.log('No applicable filter found.');
+  }
+}
+
+
+function getCriteriaValues(filterCriteria) {
+  var criteriaObj = JSON.parse(filterCriteria);
+  var criteriaValues = [];
+
+  if (criteriaObj.from) {
+    criteriaValues.push('From: ' + criteriaObj.from);
+  }
+  if (criteriaObj.to) {
+    criteriaValues.push('To: ' + criteriaObj.to);
+  }
+  if (criteriaObj.subject) {
+    criteriaValues.push('Subject: ' + criteriaObj.subject);
+  }
+  // Add more conditions for other criteria fields if needed
+
+  return criteriaValues.join(', ');
+}
+
+
+function doesTextContainsString(TexttoTest, FullText) {
+  if (FullText.includes(TexttoTest)) {
+    return true;
+  } else {
+    return false;
+  }
+}
