@@ -3,8 +3,10 @@ import { api, pool, listIds, findLabel, ensureLabel, settings, claude } from './
 import { candidatesFor, summary, q, filterCriteria, key, greedyCover, better, headerMap, bodyText, bodyParts } from './analyzer.js';
 import { messageAdapter } from './lib/gfm-message.js';
 import { analyzeScam_ } from './lib/gfm-scam.js';
+import { remember } from './stats.js';
 
 const MAX_HTML = 300000; // aperçu : au-delà, le HTML est coupé
+const lastSpams = new Map(); // dernière analyse : id → message complet (mémorisé pour les tendances avant la corbeille)
 
 // ---------- Validation d'un critère ----------
 // covers : spams du lot attrapés ; legit : mails hors Spam/Corbeille/###CACA### attrapés.
@@ -102,6 +104,8 @@ export async function analyzeSpam(post) {
   post('Lecture du dossier Spam…');
   const spamIds = await listIds('in:spam', true, s.maxSpams);
   const msgs = (await pool(spamIds, 5, id => api(`messages/${id}`, { params: { format: 'full' } }))).filter(Boolean);
+  lastSpams.clear();
+  for (const m of msgs) lastSpams.set(m.id, m);
   const todo = msgs.filter(m => !(spamLabelId && (m.labelIds || []).includes(spamLabelId)));
   const skipped = msgs.length - todo.length;
   const mails = {};
@@ -197,6 +201,8 @@ export async function applySpam(payload, post) {
 
   let trashed = 0;
   if (toTrash.size) {
+    // gardés dans l'historique des tendances : la corbeille se vide au bout de 30 jours
+    await remember([...toTrash].map(id => lastSpams.get(id)).filter(Boolean)).catch(() => {});
     post(`Mise à la corbeille de ${toTrash.size} spam(s) traité(s)…`);
     await pool([...toTrash], 4, async id => { await api(`messages/${id}/trash`, { method: 'POST' }); trashed++; });
   }

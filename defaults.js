@@ -7,5 +7,6 @@ export const DEFAULTS = {
   claudeMode: 'fallback', // 'off' | 'fallback' (Claude seulement si les règles locales échouent)
   model: 'claude-sonnet-5-5',
   maxSpams: 100,
-  blockTrackers: true     // neutraliser les pixels de suivi dans les mails affichés (tracking.js)
+  blockTrackers: true,    // neutraliser les pixels de suivi dans les mails affichés (tracking.js)
+  statsLabels: 'scam'     // libellés ajoutés aux tendances, en plus du Spam et de labelName (séparés par des virgules)
 };

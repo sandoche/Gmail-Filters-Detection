@@ -198,7 +198,7 @@
     mail: { key: '', loading: false, progress: '', error: '', data: null, explain: {}, claude: null, create: null, confirm: '' },
     spam: { loading: false, progress: '', error: '', data: null, sel: '', edits: {}, alt: {}, done: {}, off: new Set(), opts: null, busy: '', notice: null, images: false },
     simp: { loading: false, progress: '', error: '', plan: null, dupOff: new Set(), choice: {}, tests: {}, mergeOn: new Set(), report: null, backupDone: false },
-    stats: { months: 12, loading: false, progress: '', error: '', data: null, claude: null }
+    stats: { months: 12, source: 'all', loading: false, progress: '', error: '', data: null, claude: null }
   };
 
   /* ───────── contexte Gmail ───────── */
@@ -687,10 +687,10 @@
 
   /* ═════════════ onglet « Tendances » ═════════════ */
 
-  async function loadStats() {
-    S.stats = { ...S.stats, loading: true, progress: 'Liste des spams…', error: '', data: null, claude: null };
+  async function loadStats(fetch = true) {
+    S.stats = { ...S.stats, loading: true, progress: fetch ? 'Liste des spams…' : 'Calcul…', error: '', claude: null };
     render();
-    try { S.stats.data = await call('stats:run', { months: S.stats.months }, t => { S.stats.progress = t; if (S.tab === 'stats') render(); }); }
+    try { S.stats.data = await call('stats:run', { months: S.stats.months, source: S.stats.source, fetch }, t => { S.stats.progress = t; if (S.tab === 'stats') render(); }); }
     catch (e) { S.stats.error = e.message; }
     S.stats.loading = false;
     if (S.tab === 'stats') render();
@@ -698,34 +698,38 @@
 
   const pct = x => Math.round(x * 100) + ' %';
   const shortDate = t => new Date(t).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+  const monthYear = t => new Date(t).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+  const periodName = (d, t) => d.unit === 'month' ? monthYear(t) : `Semaine du ${shortDate(t)}`;
 
-  // Barres hebdomadaires (une seule série : pas de légende), pics annotés, infobulle au survol.
-  function weeklyChart(d) {
-    const W = 640, H = 170, top = 22, base = H - 22, n = d.weeks.length;
-    const max = Math.max(4, ...d.weeks.map(w => w.count));
-    const step = W / n, bw = Math.max(2, step - 2);
-    const peakWeeks = new Map(d.peaks.map(p => [p.week, p]));
-    let bars = '', hits = '', labels = '', months = '';
-    d.weeks.forEach((w, i) => {
+  // Barres par semaine ou par mois (une seule série : pas de légende), pics annotés, infobulle au survol.
+  function trendChart(d) {
+    const W = 640, H = 170, top = 22, base = H - 22, n = d.series.length;
+    const max = Math.max(4, ...d.series.map(w => w.count));
+    const step = W / n, bw = Math.max(1, step - (step > 4 ? 2 : 0.5));
+    const peaks = new Map(d.peaks.map(p => [p.start, p]));
+    let bars = '', hits = '', labels = '', ticks = '';
+    d.series.forEach((w, i) => {
       const x = i * step + (step - bw) / 2;
       const h = w.count ? Math.max(2, (w.count / max) * (base - top)) : 0;
       if (h) {
         const r = Math.min(4, bw / 2, h), y = base - h;
         bars += `<path d="M${x},${base}V${y + r}Q${x},${y} ${x + r},${y}H${x + bw - r}Q${x + bw},${y} ${x + bw},${y + r}V${base}Z" fill="#0b57d0"/>`;
       }
-      const p = peakWeeks.get(w.week);
+      const p = peaks.get(w.start);
       if (p) labels += `<text x="${x + bw / 2}" y="${base - h - 6}" text-anchor="middle" font-size="11" fill="#1f1f1f">${p.count}</text>`;
-      const tip = `Semaine du ${shortDate(w.week)} : ${plural(w.count, 'spam')}${p ? ` — pic : ${pct(p.domainShare)} venaient de ${p.domain}` : ''}`;
+      const tip = `${periodName(d, w.start)} : ${plural(w.count, 'spam')}${p ? ` — pic : ${pct(p.domainShare)} venaient de ${p.domain}` : ''}`;
       hits += `<rect class="hit" x="${i * step}" y="0" width="${step}" height="${H}" fill="transparent" data-tip="${esc(tip)}"/>`;
-      const dt = new Date(w.week);
-      if (dt.getDate() <= 7 && i < n - 2) months += `<text x="${x}" y="${H - 6}" font-size="10" fill="#5e5e5e">${dt.toLocaleDateString('fr-FR', { month: 'short' })}</text>`;
+      const dt = new Date(w.start);
+      // repères : début de chaque mois (vue par semaine) ou de chaque année (vue par mois ; trimestres si < 3 ans)
+      const tick = d.unit === 'week' ? dt.getDate() <= 7 : (n <= 36 ? dt.getMonth() % 3 === 0 : dt.getMonth() === 0);
+      if (tick && i < n - 2) ticks += `<text x="${x}" y="${H - 6}" font-size="10" fill="#5e5e5e">${d.unit === 'week' || n <= 36 ? dt.toLocaleDateString('fr-FR', { month: 'short', ...(d.unit === 'month' ? { year: '2-digit' } : {}) }) : dt.getFullYear()}</text>`;
     });
     return `<div class="chart" style="position:relative">
-      <svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Spams par semaine">
+      <svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Spams par ${d.unit === 'month' ? 'mois' : 'semaine'}">
         <line x1="0" x2="${W}" y1="${base}" y2="${base}" stroke="#c4c7c5"/>
         <line x1="0" x2="${W}" y1="${top}" y2="${top}" stroke="#eceff1" stroke-dasharray="3 3"/>
-        <text x="${W}" y="${top - 6}" text-anchor="end" font-size="10" fill="#5e5e5e">${max} / semaine</text>
-        ${bars}${labels}${months}${hits}
+        <text x="${W}" y="${top - 6}" text-anchor="end" font-size="10" fill="#5e5e5e">${max} / ${d.unit === 'month' ? 'mois' : 'semaine'}</text>
+        ${bars}${labels}${ticks}${hits}
       </svg><div class="tip" hidden></div></div>`;
   }
 
@@ -741,23 +745,28 @@
 
   function renderStats() {
     const st = S.stats;
-    const head = `<div class="row" style="margin-bottom:12px"><span class="small muted">Spams du dossier Spam et du libellé des filtres, sur</span>
-      <select data-bind="stats.months">${[3, 6, 12, 24].map(m => `<option value="${m}" ${st.months === m ? 'selected' : ''}>${m} mois</option>`).join('')}</select>
-      <button class="btn small" data-act="stats-run">${st.data ? 'Actualiser' : 'Analyser'}</button></div>`;
+    const d = st.data;
+    const head = `<div class="row" style="margin-bottom:10px"><span class="small muted">Période</span>
+      <select data-bind="stats.months">${[[3, '3 mois'], [6, '6 mois'], [12, '12 mois'], [24, '2 ans'], [60, '5 ans'], [0, 'Tout l’historique']].map(([m, t]) => `<option value="${m}" ${st.months === m ? 'selected' : ''}>${t}</option>`).join('')}</select>
+      <button class="btn small" data-act="stats-run" ${st.loading ? 'disabled' : ''}>${d ? 'Actualiser' : 'Analyser'}</button></div>
+      ${d ? `<div class="row" style="margin-bottom:12px">${[{ key: 'all', name: 'Tout', count: d.stored }, ...d.sources].map(x => `<button class="btn small ${st.source === x.key ? 'tonal' : 'text'}" data-act="stats-source" data-key="${esc(x.key)}">${esc(x.name)} <span class="muted">${x.count.toLocaleString('fr-FR')}</span></button>`).join('')}</div>` : ''}`;
     if (st.loading) { body.innerHTML = head + loading(st.progress); return; }
     if (st.error) { body.innerHTML = head + `<div class="err">${esc(st.error)}</div>`; return; }
-    if (!st.data) { body.innerHTML = head; return; }
-    const d = st.data;
+    if (!d) {
+      body.innerHTML = head + `<div class="muted small">Analyse le dossier Spam, le libellé des filtres et les libellés des options (ex. « scam »). Chaque spam lu reste dans l’historique, même après que Gmail l’a supprimé (Spam et Corbeille se vident au bout de 30 jours).</div>`;
+      return;
+    }
     if (!d.total) { body.innerHTML = head + `<div class="empty"><div class="big">🌤</div>Aucun spam sur la période.</div>`; return; }
     const ch = d.change4;
     // « hausse » / « baisse » seulement si l'écart dépasse le bruit (±10 % et au moins 5 spams)
     const dir = ch === null || Math.abs(d.last4 - d.prev4) < 5 ? 0 : ch <= -0.1 ? -1 : ch >= 0.1 ? 1 : 0;
     const trend = ch === null ? '' : `<span class="chip ${dir < 0 ? 'ok' : dir > 0 ? 'warn' : ''}">${dir < 0 ? '▼ en baisse' : dir > 0 ? '▲ en hausse' : '■ stable'} · ${d.prev4} → ${d.last4} sur 4 semaines</span>`;
     const variants = d.lists.to.filter(t => t.value !== d.me.toLowerCase() && !t.value.startsWith('('));
-    let html = head + `<div class="card soft"><div class="row"><span class="score">${d.total.toLocaleString('fr-FR')}</span><span class="grow">spams en ${d.months} mois · ${d.last4} ces 4 dernières semaines</span>${trend}</div>
-      <div class="small muted" style="margin-top:6px">Tendance de fond : ${d.monthlyTrend > 0 ? '+' : ''}${pct(d.monthlyTrend)} par mois${d.peaks.length ? ` · ${plural(d.peaks.length, 'vague')} repérée${d.peaks.length > 1 ? 's' : ''}` : ' · pas de vague marquée'}${d.capped ? ' · limité aux 3 000 plus récents' : ''}</div></div>`;
-    html += `<h2>Spams par semaine</h2>${weeklyChart(d)}`;
-    if (d.peaks.length) html += `<div class="card">${d.peaks.map(p => `<div class="finding"><span class="pts">🌊</span><span><b>Semaine du ${shortDate(p.week)} : ${plural(p.count, 'spam')}</b> — ${pct(p.domainShare)} venaient de <a href="${esc(searchUrl('from:(' + p.domain + ')'))}" target="_blank" rel="noopener">${esc(p.domain)}</a></span></div>`).join('')}</div>`;
+    let html = head + `<div class="card soft"><div class="row"><span class="score">${d.total.toLocaleString('fr-FR')}</span><span class="grow">spams ${d.months ? `sur ${d.months >= 24 ? d.months / 12 + ' ans' : d.months + ' mois'}` : 'en tout'} · ${d.last4} ces 4 dernières semaines</span>${trend}</div>
+      <div class="small muted" style="margin-top:6px">Tendance de fond : ${d.monthlyTrend > 0 ? '+' : ''}${pct(d.monthlyTrend)} par mois${d.peaks.length ? ` · ${plural(d.peaks.length, 'vague')} repérée${d.peaks.length > 1 ? 's' : ''}` : ' · pas de vague marquée'}
+      · historique depuis ${d.historyFrom ? monthYear(d.historyFrom) : '—'} (${d.stored.toLocaleString('fr-FR')} spams gardés${d.fresh ? `, dont ${d.fresh.toLocaleString('fr-FR')} nouveaux` : ''})</div></div>`;
+    html += `<h2>Spams par ${d.unit === 'month' ? 'mois' : 'semaine'}</h2>${trendChart(d)}`;
+    if (d.peaks.length) html += `<div class="card">${d.peaks.map(p => `<div class="finding"><span class="pts">🌊</span><span><b>${periodName(d, p.start)} : ${plural(p.count, 'spam')}</b> — ${pct(p.domainShare)} venaient de <a href="${esc(searchUrl('from:(' + p.domain + ')'))}" target="_blank" rel="noopener">${esc(p.domain)}</a></span></div>`).join('')}</div>`;
 
     html += `<h2>Points communs</h2>`;
     const commonText = c => c.field === 'words' ? esc(c.label.replace('%s', c.value))
@@ -900,6 +909,7 @@
       case 'pick': el.checked ? S.spam.off.delete(el.dataset.pid) : S.spam.off.add(el.dataset.pid); render(); break;
       case 'plan': loadPlan(); break;
       case 'stats-run': loadStats(); break;
+      case 'stats-source': S.stats.source = el.dataset.key; loadStats(false); break;
       case 'stats-claude':
         S.stats.claude = { loading: true }; render();
         try { S.stats.claude = await call('stats:claude'); }

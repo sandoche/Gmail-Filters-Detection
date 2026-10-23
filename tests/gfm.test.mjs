@@ -189,7 +189,7 @@ test('tendances : pic expliqué, baisse, point commun « adresse avec points »'
   const rs = [];
   for (let w = 20; w >= 1; w--) for (let i = 0; i < (w > 10 ? 6 : 2); i++) rs.push(rec(w, 'divers' + (i % 3) + '.com'));
   for (let i = 0; i < 30; i++) rs.push(rec(12, 'pastintel.org.uk', 's.oaresden@gmail.com'));   // la vague
-  const a = aggregate(rs, me, { weeks: 26, now });
+  const a = aggregate(rs, me, { periods: 26, now });
   assert.equal(a.peaks.length, 1);
   assert.equal(a.peaks[0].domain, 'pastintel.org.uk');
   assert.ok(a.monthlyTrend < 0, 'le volume baisse');

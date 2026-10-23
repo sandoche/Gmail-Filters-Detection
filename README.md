@@ -57,7 +57,9 @@ Ouvre un mail, clique sur **Filtres** (en bas à droite) :
 
 ![Onglet « Tendances »](docs/screenshots/tendances.jpg)
 
-- spams par semaine (dossier Spam + libellé des filtres), tendance, **vagues** et le domaine qui les explique ;
+- sources : dossier Spam, libellé des filtres (`###CACA###`) et les libellés choisis dans les options (`scam` par défaut) — un bouton par source pour voir ses vagues à part ;
+- **historique gardé** : chaque spam lu reste dans les statistiques même après que Gmail l'a supprimé (Spam et Corbeille se vident au bout de 30 jours) ; les spams traités depuis l'onglet Spams y sont notés avant d'aller à la corbeille. Périodes de 3 mois à tout l'historique (au-delà de 2 ans, un point par mois) ;
+- spams par semaine ou par mois, tendance, **vagues** et le domaine qui les explique ;
 - **points communs** : ce qui revient dans au moins un quart des spams ;
 - **adresse visée** : Gmail ignore les points et le « + » (pour `jeandupont@gmail.com`, les adresses `jean.dupont@gmail.com` et `jeandupont+shop@gmail.com` arrivent dans la même boîte), mais pas les bases de données qui ont fuité — **une écriture différente désigne la liste d'origine**. Avec un service d'alias (Firefox Relay…), chaque alias n'a été donné qu'à un site : **l'alias visé désigne le site qui a fuité** ;
 - domaines, serveurs (IP /24), plateformes d'envoi, extensions, mots des objets ;

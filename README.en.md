@@ -57,7 +57,9 @@ Open an email and click **Filtres** (bottom right):
 
 ![“Tendances” tab](docs/screenshots/tendances.jpg)
 
-- spam per week (Spam folder + filter label), trend, **waves** and the domain behind each one;
+- sources: Spam folder, the filter label (`###CACA###`) and the labels chosen in the options (`scam` by default) — one button per source to see its own waves;
+- **history kept**: every spam read stays in the statistics even after Gmail deletes it (Spam and Trash are emptied after 30 days); spam handled from the Spams tab is recorded before going to the trash. Periods from 3 months to the whole history (beyond 2 years, one point per month);
+- spam per week or per month, trend, **waves** and the domain behind each one;
 - **common points**: anything found in at least a quarter of the spam;
 - **address targeted**: Gmail ignores dots and "+" (for `johndoe@gmail.com`, `john.doe@gmail.com` and `johndoe+shop@gmail.com` land in the same inbox), but leaked databases don't — **a different spelling points to the list it came from**. With an alias service (Firefox Relay…), each alias was given to a single site: **the alias targeted points to the site that leaked it**;
 - domains, servers (IP /24), sending platforms, TLDs, subject words;

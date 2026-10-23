@@ -145,14 +145,21 @@ await test('simplification : doublons, « dick » trop large, application', asyn
   assert.equal(local.gfmJob, undefined);
 });
 
-await test('tendances : spams lus une seule fois, cache réutilisé', async () => {
+await test('tendances : historique gardé, spams lus une seule fois, sources', async () => {
   const before = calls.length;
   const a = await call('stats:run', { months: 12 });
-  assert.equal(a.total, 3);                         // u1 (Spam) + k1 et c1 (###CACA###) ; les autres sont à la corbeille
+  // w1, w2, d1 : mis à la corbeille par l'onglet Spams, mémorisés avant ; u1 (Spam) ; k1 et c1 (###CACA###)
+  assert.equal(a.total, 6);
   assert.equal(a.fresh, 3);
+  assert.deepEqual(a.sources.map(s => [s.name, s.count]), [['Spam', 5], ['###CACA###', 2]]);   // k1 est dans les deux
+  store.splice(store.findIndex(m => m.id === 'u1'), 1);   // Gmail vide le Spam au bout de 30 jours
   const b = await call('stats:run', { months: 12 });
   assert.equal(b.fresh, 0);
-  assert.ok(calls.slice(before).filter(c => /^GET messages\/\w+$/.test(c)).length === 3, 'en-têtes lus une seule fois');
+  assert.equal(b.total, 6, 'un spam supprimé par Gmail reste dans l’historique');
+  assert.equal(calls.slice(before).filter(c => /^GET messages\/\w+$/.test(c)).length, 3, 'en-têtes lus une seule fois');
+  const onlyCaca = await call('stats:run', { months: 0, source: 'L_CACA', fetch: false });
+  assert.equal(onlyCaca.total, 2);
+  assert.equal(onlyCaca.unit, 'week');
 });
 
 assert.equal(auths, 1, 'une seule fenêtre de connexion Google');
