@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Traiter mes spams – Options</title>
+<style>
+  body { font-family: "Google Sans", Roboto, Arial, sans-serif; max-width: 640px; margin: 32px auto; padding: 0 16px; color: #202124; }
+  h1 { font-size: 20px; }
+  label { display: block; margin: 14px 0 4px; font-weight: 600; font-size: 14px; }
+  .chk { font-weight: 400; display: flex; gap: 8px; align-items: center; }
+  input[type=text], input[type=password], input[type=number], select { width: 100%; padding: 8px; border: 1px solid #dadce0; border-radius: 6px; font-size: 14px; }
+  small { color: #5f6368; }
+  button { margin-top: 20px; background: #1a73e8; color: #fff; border: 0; border-radius: 6px; padding: 10px 18px; font-size: 14px; cursor: pointer; }
+  #ok { color: #137333; margin-left: 10px; }
+</style>
+</head>
+<body>
+<h1>Traiter mes spams – Options</h1>
+
+<label for="labelName">Libellé appliqué par les filtres</label>
+<input type="text" id="labelName">
+
+<label class="chk"><input type="checkbox" id="archive"> Ne pas afficher dans la boîte de réception (archiver)</label>
+<label class="chk"><input type="checkbox" id="trashAfter"> Mettre à la corbeille les spams traités une fois le filtre créé</label>
+<label class="chk"><input type="checkbox" id="applyExisting"> Cocher par défaut « Appliquer aussi aux conversations correspondantes »</label>
+
+<label for="maxSpams">Nombre maximum de spams analysés par passage</label>
+<input type="number" id="maxSpams" min="1" max="500">
+
+<label for="claudeMode">Claude en secours</label>
+<select id="claudeMode">
+  <option value="fallback">Oui : si les règles locales ne trouvent pas de critère sûr</option>
+  <option value="off">Non : règles locales uniquement</option>
+</select>
+
+<label for="anthropicKey">Clé API Anthropic</label>
+<input type="password" id="anthropicKey" placeholder="sk-ant-…" autocomplete="off">
+<small>Stockée uniquement dans ce navigateur (chrome.storage.local), jamais synchronisée.</small>
+
+<label for="model">Modèle Claude</label>
+<input type="text" id="model">
+<small>Nom exact d’un modèle disponible sur ton compte API (voir docs.claude.com → Models).</small>
+
+<div><button id="save">Enregistrer</button><span id="ok"></span></div>
+<script type="module" src="options.js"></script>
+</body>
+</html>
