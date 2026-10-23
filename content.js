@@ -604,7 +604,8 @@
     const p = s.plan;
     const dupN = p.duplicates.reduce((n, d) => n + d.remove.length, 0);
     const mergeN = p.merges.reduce((n, m) => n + m.rules.length - 1, 0);
-    let html = `<div class="card soft"><div class="row"><span class="score">${p.total.toLocaleString('fr-FR')}</span><span class="grow">filtres aujourd’hui</span></div>
+    let html = `<div class="card soft"><div class="row"><span class="score">${p.total.toLocaleString('fr-FR')}</span><span class="grow">filtres aujourd’hui</span>
+        <button class="btn small" data-act="export" title="Fichier réimportable dans Gmail, et utilisable par l'archiveur Thunderbird pour ranger les vieux mails">💾 Exporter mes filtres</button></div>
       <div class="small muted" style="margin-top:6px">${plural(dupN, 'doublon')} · ${plural(p.overlaps.length, 'recoupement')} à arbitrer · jusqu’à ${mergeN} filtres en moins par fusion.
       Avant toute modification, une sauvegarde XML de tous tes filtres est téléchargée (réimportable dans Gmail → Paramètres → Filtres → Importer).</div></div>`;
     if (p.job) html += `<div class="note">Une simplification a été interrompue : ${p.job.next} / ${p.job.ops.length} faites. <button class="btn small" data-act="resume">Reprendre</button></div>`;
@@ -917,6 +918,12 @@
         if (S.tab === 'stats') render();
         break;
       case 'resume': applyOps([], true); break;
+      case 'export':
+        try {
+          const b = await call('filters:backup');
+          download(`mailFilters_${new Date().toISOString().slice(0, 10)}.xml`, b.xml);
+        } catch (err) { S.simp.error = err.message; render(); }
+        break;
       case 'dup': { const i = +el.dataset.i; el.checked ? S.simp.dupOff.delete(i) : S.simp.dupOff.add(i); break; }
       case 'merge': { const i = +el.dataset.i; el.checked ? S.simp.mergeOn.add(i) : S.simp.mergeOn.delete(i); render(); break; }
       case 'merge-all': S.simp.plan.merges.forEach((_, i) => S.simp.mergeOn.add(i)); render(); break;
