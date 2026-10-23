@@ -24,7 +24,9 @@ async function idsOf(labelId, months) {
 async function sourcesOf(s) {
   const r = await api('labels');
   const labels = (r && r.labels) || [];
-  const byName = n => labels.find(l => l.name.toLowerCase() === n.trim().toLowerCase());
+  // « scam » trouve aussi « ►/02📜Admin/👿Scams » : comparaison sur le dernier niveau, sans émojis ni pluriel
+  const loose = s => String(s).split('/').pop().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase().replace(/s$/, '');
+  const byName = n => labels.find(l => l.name.toLowerCase() === n.trim().toLowerCase()) || labels.find(l => l.type === 'user' && loose(l.name) === loose(n));
   const out = [{ key: 'SPAM', name: 'Spam' }];
   const main = byName(s.labelName);
   if (main) out.push({ key: main.id, name: main.name });
