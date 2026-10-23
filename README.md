@@ -41,7 +41,8 @@ Ouvre un mail, clique sur **Filtres** (en bas à droite) :
 
 - chaque spam avec sa **note de danger**, et son **aperçu** à droite (scripts, liens et images distantes désactivés ; les images peuvent être affichées sur demande, les pixels de suivi restent retirés) ;
 - des **filtres proposés**, chacun testé dans ta vraie boîte pour attraper ce spam et **0 mail légitime** : uniquement des **mots** (phrase exacte de l'objet ou du corps), jamais l'expéditeur — les spammeurs changent d'adresse à chaque envoi, pas de texte. Si rien de sûr n'est trouvé, Claude peut en proposer (facultatif) ;
-- tu coches, tu modifies, tu valides : filtres créés (libellé `###CACA###` + archivage par défaut), spams traités mis à la corbeille (récupérables 30 jours).
+- **plusieurs propositions par spam**, la meilleure en premier : celle qui attrape le plus de spams déjà reçus, puis la plus courte (une phrase courte attrape aussi les variantes de la campagne). Les filtres sur l'objet sont des phrases exactes : `subject:"…"` ;
+- **un par un** (« Créer ce filtre » sur chaque carte) ou tous les cochés d'un coup : filtres créés (libellé `###CACA###` + archivage par défaut), spams traités mis à la corbeille (récupérables 30 jours).
 
 ### Simplifier mes filtres
 

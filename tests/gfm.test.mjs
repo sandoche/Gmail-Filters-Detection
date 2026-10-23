@@ -81,6 +81,22 @@ test('doublons', () => {
 });
 
 /* ── sauvegarde et simplification ── */
+test('simplification au caractère près : accents, tirets, points et « _ » comptent', () => {
+  const caca = { addLabelIds: ['L1'], removeLabelIds: ['INBOX'] };
+  const f = (id, query) => ({ id, criteria: { query }, action: caca });
+  const plan = simplifyPlan_(buildIndexFromRaw_({ labels: raw.labels, filters: [
+    f('b1', '"etude prospective"'), f('b2', '"étude prospective"'),
+    f('b3', '"eté.récupérè"'), f('b4', '"été récupéré"'), f('b5', '"ete.recupere"'),
+    f('b6', '"érection"'), f('b7', '"erection muscle"'), f('b8', '"Erection Switch"'),
+    f('b9', '"Dating-Site"'), f('b10', '"the dating site"'), f('b11', '"free dating site"'),
+    f('b12', '"bounce_"'), f('b13', '"Surprise bounce"'),
+    f('b14', '"Étude prospective"'),                                  // même texte que b2 à la casse près : vrai doublon
+    f('b15', '"érection"'.toUpperCase()), f('b16', '"forte érection garantie"')
+  ] }));
+  assert.deepEqual(plan.duplicates.map(d => [d.keep.id, ...d.remove.map(r => r.id)].sort()), [['b14', 'b2'], ['b15', 'b6']]);
+  // b15 est gardé (id le plus petit) parmi les deux « érection » ; il ne couvre que la phrase qui le contient tel quel
+  assert.deepEqual(plan.overlaps.map(o => [o.broad.id, o.narrows.map(r => r.id)]), [['b15', ['b16']]]);
+});
 test('sauvegarde XML au format Gmail', () => {
   const xml = exportXml_(index);
   assert.equal((xml.match(/<entry>/g) || []).length, 5);
@@ -154,6 +170,17 @@ test('adresse visée : exacte, avec points, avec +, masquée', () => {
   assert.deepEqual(addressVariant('x@y.com, s.oaresden@gmail.com', me), { address: 's.oaresden@gmail.com', kind: 'avec points' });
   assert.equal(addressVariant('soaresden+shop@gmail.com', me).kind, 'avec +');
   assert.equal(addressVariant('undisclosed-recipients:;', me).kind, 'masquée');
+  assert.equal(addressVariant('me@nhveo.pn', me).kind, 'faux destinataire');
+  assert.deepEqual(addressVariant('opx7a862u@mozmail.com', me), { address: 'opx7a862u@mozmail.com', kind: 'alias relais' });
+});
+test('scam : mail « de toi-même » et faux destinataire en Cci', () => {
+  const self = msg('s2', { From: 'Soares Den <soares.den@gmail.com>', To: 'me@nhveo.pn', 'Delivered-To': 'soaresden@gmail.com', Subject: 'Ton compte a été piraté',
+    'Authentication-Results': 'mx.google.com; spf=softfail; dmarc=fail' }, '<p>Paie en bitcoin.</p>');
+  const titles = analyzeScam_(self).findings.map(f => f.title).join(' | ');
+  assert.match(titles, /Se fait passer pour toi/);
+  assert.match(titles, /Faux destinataire/);
+  const mine = msg('s3', { From: 'soaresden@gmail.com', To: 'ami@laposte.net', 'Delivered-To': 'soaresden@gmail.com', Subject: 'Coucou' }, '<p>Salut</p>', { labelIds: ['SENT'] });
+  assert.doesNotMatch(analyzeScam_(mine).findings.map(f => f.title).join(' | '), /Se fait passer pour toi/);
 });
 test('tendances : pic expliqué, baisse, point commun « adresse avec points »', () => {
   const me = 'soaresden@gmail.com';

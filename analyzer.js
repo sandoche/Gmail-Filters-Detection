@@ -93,6 +93,26 @@ function phrasesFromSegments(segments, { min = 3, max = 7 } = {}) {
     .map(ws => ws.join(' '));
 }
 
+// Sous-phrases courtes (fenêtres de `sizes` mots) : plus générales que la phrase entière, elles attrapent aussi
+// les variantes d'une même campagne. On garde les `k` plus « parlantes » (le plus de mots porteurs de sens),
+// sans mot vide en début ni en fin.
+function shortPhrases(segments, { sizes = [3, 4], k = 4 } = {}) {
+  const seen = new Set(), out = [];
+  for (const seg of segments) {
+    for (const n of sizes) {
+      for (let i = 0; i + n <= seg.length; i++) {
+        const ws = seg.slice(i, i + n);
+        if (STOP.has(ws[0].toLowerCase()) || STOP.has(ws[n - 1].toLowerCase()) || contentWords(ws) < 2) continue;
+        const p = ws.join(' ');
+        if (seen.has(p.toLowerCase())) continue;
+        seen.add(p.toLowerCase());
+        out.push({ p, score: ws.filter(w => !STOP.has(w.toLowerCase())).reduce((s, w) => s + Math.min(w.length, 9), 0) });
+      }
+    }
+  }
+  return out.sort((a, b) => b.score - a.score || a.p.length - b.p.length).slice(0, k).map(x => x.p);
+}
+
 export function q(c) {
   if (c.type === 'subject') return `subject:"${c.value}"`;
   if (c.type === 'query') return `"${c.value}"`;
@@ -123,23 +143,27 @@ export function candidatesFor(msg, userEmail = '') {
   const seen = new Set();
   const add = c => { const k = key(c); if (!seen.has(k)) { seen.add(k); out.push(c); } };
 
-  for (const p of phrasesFromSegments(cleanSegments(subject, userTokens))) {
-    add({ type: 'subject', value: p, label: 'Phrase exacte dans l’objet' });
-  }
+  const subjSegs = cleanSegments(subject, userTokens);
+  for (const p of phrasesFromSegments(subjSegs)) add({ type: 'subject', value: p, label: 'Phrase exacte dans l’objet' });
+  for (const p of shortPhrases(subjSegs)) add({ type: 'subject', value: p, label: 'Morceau de l’objet' });
 
   const body = bodyText(msg.payload);
+  const bodySegs = [];
   let n = 0;
   for (const line of body.split(/\n|(?<=[.!?])\s+/)) {
-    if (n >= 4) break;
+    if (n >= 3) break;
     if (GENERIC.test(line)) continue;
-    for (const p of phrasesFromSegments(cleanSegments(line, userTokens), { min: 4, max: 8 })) {
-      if (n >= 4) break;
+    const segs = cleanSegments(line, userTokens);
+    for (const p of phrasesFromSegments(segs, { min: 4, max: 8 })) {
+      if (n >= 3) break;
       add({ type: 'query', value: p, label: 'Phrase exacte dans le mail' });
+      bodySegs.push(...segs);
       n++;
     }
   }
+  for (const p of shortPhrases(bodySegs, { sizes: [3, 4], k: 2 })) add({ type: 'query', value: p, label: 'Morceau du texte' });
 
-  return out.slice(0, 8);
+  return out.slice(0, 12);
 }
 
 export function summary(msg) {
@@ -156,8 +180,14 @@ export function summary(msg) {
   };
 }
 
+// Meilleur critère d'abord : celui qui attrape le plus de spams déjà reçus (`total` : Spam, corbeille, libellé),
+// puis la phrase la plus courte (plus générale : elle attrape aussi les variantes de la campagne).
+export function better(a, b) {
+  return (b.total || 0) - (a.total || 0) || a.cand.value.length - b.cand.value.length || rank(b.cand) - rank(a.cand);
+}
+
 // Couverture gloutonne : choisit le moins de critères possible pour couvrir les spams.
-// valid : [{cand, covers:Set(ids du lot)}] — déjà filtrés (0 mail légitime, couvre au moins son spam).
+// valid : [{cand, covers:Set(ids du lot), total}] — déjà filtrés (0 mail légitime, couvre au moins son spam).
 export function greedyCover(valid, ids) {
   const left = new Set(ids);
   const chosen = [];
@@ -166,10 +196,8 @@ export function greedyCover(valid, ids) {
     for (const v of valid) {
       const gain = [...v.covers].filter(i => left.has(i)).length;
       if (!gain) continue;
-      const better = !best || gain > bestGain ||
-        (gain === bestGain && rank(v.cand) > rank(best.cand)) ||
-        (gain === bestGain && rank(v.cand) === rank(best.cand) && v.cand.value.length > best.cand.value.length);
-      if (better) { best = v; bestGain = gain; }
+      const isBetter = !best || gain > bestGain || (gain === bestGain && better(v, best) < 0);
+      if (isBetter) { best = v; bestGain = gain; }
     }
     if (!best) break;
     chosen.push({ ...best, covers: new Set([...best.covers].filter(i => left.has(i))) });

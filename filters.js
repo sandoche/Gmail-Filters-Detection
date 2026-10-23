@@ -4,7 +4,7 @@ import { htmlToText, headerMap } from './analyzer.js';
 import { messageAdapter } from './lib/gfm-message.js';
 import { analyzeThread_, explainLabel_ } from './lib/gfm-match.js';
 import { analyzeScam_ } from './lib/gfm-scam.js';
-import { unionRaw_, buildIndexFromRaw_, filterSignature_, exportXml_, simplifyPlan_ } from './lib/gfm-filters.js';
+import { unionRaw_, buildIndexFromRaw_, strictSignature_, exportXml_, simplifyPlan_ } from './lib/gfm-filters.js';
 
 const SYSTEM_LABELS = /^(INBOX|SPAM|TRASH|UNREAD|STARRED|IMPORTANT|SENT|DRAFT|CHAT|CATEGORY_.*)$/;
 
@@ -208,8 +208,8 @@ export async function createFilter({ field, value, target, archive, markRead }, 
   if (markRead) action.removeLabelIds.push('UNREAD');
   if (!action.removeLabelIds.length) delete action.removeLabelIds;
 
-  const sig = filterSignature_(criteria, action);
-  const dup = idx.rules.find(r => filterSignature_(r.criteria, r.rawAction) === sig);
+  const sig = strictSignature_(criteria, action);
+  const dup = idx.rules.find(r => strictSignature_(r.criteria, r.rawAction) === sig);
   if (dup) throw new Error(`Ce filtre existe déjà : ${dup.description} → ${dup.actions.join(', ')}`);
 
   post('Création du filtre…');

@@ -1,6 +1,6 @@
 // Dossier Spam : dangerosité de chaque spam, filtres proposés (testés à 0 mail légitime), création après validation.
 import { api, pool, listIds, findLabel, ensureLabel, settings, claude } from './gmail-api.js';
-import { candidatesFor, summary, q, filterCriteria, key, greedyCover, headerMap, bodyText, bodyParts } from './analyzer.js';
+import { candidatesFor, summary, q, filterCriteria, key, greedyCover, better, headerMap, bodyText, bodyParts } from './analyzer.js';
 import { messageAdapter } from './lib/gfm-message.js';
 import { analyzeScam_ } from './lib/gfm-scam.js';
 
@@ -58,7 +58,9 @@ Types autorisés :
 Spams :
 ${JSON.stringify(items, null, 1)}`;
   const text = await claude(s, prompt);
-  const json = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));
+  let json;
+  try { json = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)); }
+  catch (e) { throw new Error('réponse de Claude illisible (pas de JSON) : « ' + text.slice(0, 120) + ' »'); }
   const out = [];
   for (const r of json.results || []) {
     for (const c of r.candidates || []) {
@@ -121,22 +123,30 @@ export async function analyzeSpam(post) {
     if (done % 5 === 0) post(`Critères testés : ${done}/${cands.length}`);
     return r;
   });
-  let { chosen, uncovered } = greedyCover(results.filter(r => r.ok), todo.map(m => m.id));
+  const ok = results.filter(r => r.ok);
+  let { chosen, uncovered } = greedyCover(ok, todo.map(m => m.id));
   let claudeError = '';
 
   if (uncovered.length && s.claudeMode === 'fallback' && s.anthropicKey) {
     post(`${uncovered.length} spam(s) sans critère sûr : je demande à Claude…`);
     try {
-      const extra = await claudeCandidates(uncovered.map(id => byId.get(id)), s);
-      const g2 = greedyCover((await pool(extra, 3, validate)).filter(r => r.ok), uncovered);
+      const extra = (await pool(await claudeCandidates(uncovered.map(id => byId.get(id)), s), 3, validate)).filter(r => r.ok);
+      ok.push(...extra);
+      const g2 = greedyCover(extra, uncovered);
       chosen = chosen.concat(g2.chosen);
       uncovered = g2.uncovered;
     } catch (e) { claudeError = e.message; }
   }
 
+  // Pour chaque carte : tous les critères sûrs qui couvrent les mêmes spams, le meilleur d'abord (choix proposé).
+  const view = r => ({ cand: r.cand, query: q(r.cand), total: r.total });
   return {
     ...base,
-    proposals: chosen.map((v, i) => ({ pid: 'p' + i, cand: v.cand, query: q(v.cand), total: v.total, coverIds: [...v.covers] })),
+    proposals: chosen.map((v, i) => {
+      const coverIds = [...v.covers];
+      const alts = ok.filter(r => coverIds.every(id => r.covers.has(id))).sort(better).slice(0, 6);
+      return { pid: 'p' + i, coverIds, alts: (alts.length ? alts : [v]).map(view) };
+    }),
     uncovered,
     claudeError,
     claudeUsed: s.claudeMode === 'fallback' && !!s.anthropicKey,

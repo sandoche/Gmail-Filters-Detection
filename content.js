@@ -196,7 +196,7 @@
     tab: 'mail',
     status: null, statusError: '',
     mail: { key: '', loading: false, progress: '', error: '', data: null, explain: {}, claude: null, create: null, confirm: '' },
-    spam: { loading: false, progress: '', error: '', data: null, sel: '', edits: {}, off: new Set(), opts: null, report: null, images: false },
+    spam: { loading: false, progress: '', error: '', data: null, sel: '', edits: {}, alt: {}, done: {}, off: new Set(), opts: null, busy: '', notice: null, images: false },
     simp: { loading: false, progress: '', error: '', plan: null, dupOff: new Set(), choice: {}, tests: {}, mergeOn: new Set(), report: null, backupDone: false },
     stats: { months: 12, loading: false, progress: '', error: '', data: null, claude: null }
   };
@@ -234,8 +234,8 @@
 
   function render() {
     root.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === S.tab));
-    drawer.classList.toggle('wide', (S.tab === 'spam' && !!S.spam.data && !S.spam.report) || (S.tab === 'stats' && !!S.stats.data));
-    body.classList.toggle('flush', S.tab === 'spam' && !!S.spam.data && !S.spam.report);
+    drawer.classList.toggle('wide', (S.tab === 'spam' && !!S.spam.data) || (S.tab === 'stats' && !!S.stats.data));
+    body.classList.toggle('flush', S.tab === 'spam' && !!S.spam.data);
     footer.hidden = true;
     footer.innerHTML = '';
     if (S.tab === 'mail') renderMail();
@@ -411,7 +411,7 @@
   /* ═════════════ onglet « Spams » ═════════════ */
 
   async function loadSpam() {
-    S.spam = { ...S.spam, loading: true, progress: 'Connexion à Gmail…', error: '', data: null, sel: '', edits: {}, off: new Set(), report: null };
+    S.spam = { ...S.spam, loading: true, progress: 'Connexion à Gmail…', error: '', data: null, sel: '', edits: {}, alt: {}, done: {}, off: new Set(), busy: '', notice: null };
     render();
     try {
       const data = await call('spam:analyze', {}, t => { S.spam.progress = t; if (S.tab === 'spam') render(); });
@@ -480,7 +480,6 @@
       body.innerHTML = `<div class="empty"><div class="big">🛡️</div><b>Dossier Spam</b><br>Dangerosité de chaque spam, et filtres proposés pour qu’ils n’y arrivent plus — testés pour n’attraper aucun vrai mail.<div style="margin-top:20px"><button class="btn filled" data-act="spam-run">Analyser le dossier Spam</button></div></div>`;
       return;
     }
-    if (sp.report) { renderSpamReport(); return; }
     const d = sp.data, o = sp.opts;
     const count = Object.keys(d.mails).length;
     if (!count) { body.innerHTML = `<div class="empty"><div class="big">✨</div><b>Rien à traiter</b><br>${d.total} mail(s) dans le Spam, ${d.skipped} déjà en ${esc(d.labelName)}.</div>`; return; }
@@ -493,16 +492,26 @@
           <label class="check"><input type="checkbox" data-bind="opts.trashAfter" ${o.trashAfter ? 'checked' : ''}> Mettre à la corbeille les spams traités</label>
           <label class="check"><input type="checkbox" data-bind="opts.applyExisting" ${o.applyExisting ? 'checked' : ''}> Appliquer aussi aux conversations existantes</label>
         </div></details>`;
-    if (d.proposals.length) list += `<h2>Filtres proposés <span class="count">${d.proposals.length} · 0 mail légitime chacun</span></h2>`;
+    if (sp.notice) list += `<div class="${sp.notice.ok ? 'good' : 'err'}">${esc(sp.notice.text)}</div>`;
+    if (d.proposals.length) list += `<h2>Filtres proposés <span class="count">${d.proposals.length} · 0 mail légitime chacun</span></h2>
+      <div class="desc">Le premier choix attrape le plus de spams déjà reçus ; une phrase courte attrape aussi les variantes de la campagne.</div>`;
     for (const p of d.proposals) {
-      const off = sp.off.has(p.pid);
-      const kind = p.cand.type === 'subject' ? 'Objet' : 'Texte du mail';
+      const done = sp.done[p.pid];
+      const off = sp.off.has(p.pid) || !!done;
+      const cur = current(p);
+      const kindOf = c => c.type === 'subject' ? 'Objet' : 'Texte';
+      const reach = a => `${plural(a.total, 'spam')} déjà reçu${a.total > 1 ? 's' : ''}`;
       list += `<div class="card ${off ? 'off' : ''}">
-        <div class="row"><input type="checkbox" data-act="pick" data-pid="${p.pid}" ${off ? '' : 'checked'} title="Créer ce filtre">
-          <span class="chip blue">${kind}</span>${p.cand.byClaude ? '<span class="chip warn">✦ Claude</span>' : ''}<span class="grow"></span>
-          <a class="small" href="${esc(searchUrl(p.query))}" target="_blank" rel="noopener">Tester dans Gmail ↗</a></div>
-        <input type="text" class="crit-edit" style="margin:8px 0 4px" data-edit="${p.pid}" value="${esc(sp.edits[p.pid] ?? p.cand.value)}" title="Modifiable : une phrase modifiée est re-testée avant la création">
-        ${p.coverIds.map(mailRow).join('')}
+        <div class="row"><input type="checkbox" data-act="pick" data-pid="${p.pid}" ${off ? '' : 'checked'} ${done ? 'disabled' : ''} title="Inclure dans « Créer les filtres »">
+          <span class="chip blue">${kindOf(cur.cand)}</span>${cur.cand.byClaude ? '<span class="chip warn">✦ Claude</span>' : ''}<span class="chip ok">${reach(cur)}</span><span class="grow"></span>
+          <a class="small" href="${esc(searchUrl(cur.query))}" target="_blank" rel="noopener">Tester dans Gmail ↗</a></div>
+        <input type="text" class="crit-edit" style="margin:8px 0 4px" data-edit="${p.pid}" value="${esc(sp.edits[p.pid] ?? cur.cand.value)}" ${done ? 'disabled' : ''} title="Modifiable : une phrase modifiée est re-testée avant la création">
+        ${p.alts.length > 1 && !done ? `<details style="margin:2px 0 6px" ${sp.alt[p.pid] !== undefined ? 'open' : ''}><summary>Choisir parmi ${p.alts.length} propositions</summary>
+          ${p.alts.map((a, i) => `<label class="choice"><input type="radio" name="alt-${p.pid}" data-act="alt" data-pid="${p.pid}" value="${i}" ${(sp.alt[p.pid] || 0) === i ? 'checked' : ''}>
+            <span class="grow"><span class="chip">${kindOf(a.cand)}</span> <code>${esc(a.cand.value)}</code><br><span class="small muted">${reach(a)} · 0 vrai mail</span></span></label>`).join('')}</details>` : ''}
+        ${p.coverIds.slice(0, 3).map(mailRow).join('')}${p.coverIds.length > 3 ? `<div class="small muted" style="padding:2px 10px">… et ${p.coverIds.length - 3} autre${p.coverIds.length > 4 ? 's' : ''} spam${p.coverIds.length > 4 ? 's' : ''}</div>` : ''}
+        <div class="row" style="margin-top:8px"><span class="grow small ${done && !done.ok ? '' : 'muted'}" ${done && !done.ok ? 'style="color:var(--red)"' : ''}>${done ? (done.ok ? '✓ ' : '✗ ') + esc(done.msg) : ''}</span>
+          ${done && done.ok ? '' : `<button class="btn small filled" data-act="spam-one" data-pid="${p.pid}" ${sp.busy ? 'disabled' : ''}>Créer ce filtre</button>`}</div>
       </div>`;
     }
     if (d.uncovered.length) {
@@ -511,13 +520,20 @@
     }
     if (d.claudeError) list += `<div class="err">Claude : ${esc(d.claudeError)}</div>`;
 
+    const scroll = root.querySelector('.split > .list');
+    const keep = scroll ? scroll.scrollTop : 0;
     body.innerHTML = `<div class="split"><div class="list">${list}</div><div class="preview">${previewPane()}</div></div>`;
+    root.querySelector('.split > .list').scrollTop = keep;      // on reste au même endroit après « Créer ce filtre »
     fillPreview();
-    const n = d.proposals.filter(p => !sp.off.has(p.pid)).length;
-    setFooter(`<span class="hint">Rien n’est créé tant que tu n’as pas validé.</span>
-      <button class="btn" data-act="spam-run">Relancer l’analyse</button>
-      <button class="btn filled" data-act="spam-apply" ${n ? '' : 'disabled'}>Créer ${plural(n, 'filtre')}</button>`);
+    const n = toCreate().length;
+    setFooter(`<span class="hint">${sp.busy ? esc(sp.busy) : 'Rien n’est créé tant que tu n’as pas validé.'}</span>
+      <button class="btn" data-act="spam-run" ${sp.busy ? 'disabled' : ''}>Relancer l’analyse</button>
+      <button class="btn filled" data-act="spam-apply" ${n && !sp.busy ? '' : 'disabled'}>Créer ${n > 1 ? `les ${n} filtres` : n ? 'le filtre coché' : 'les filtres'}</button>`);
   }
+
+  // Choix en cours d'une carte (le premier = celui qui attrape le plus de spams déjà reçus)
+  const current = p => p.alts[S.spam.alt[p.pid] || 0];
+  const toCreate = () => S.spam.data.proposals.filter(p => !S.spam.off.has(p.pid) && !(S.spam.done[p.pid] && S.spam.done[p.pid].ok));
 
   function fillPreview() {
     const f = root.querySelector('.pv-frame');
@@ -528,27 +544,27 @@
     if (t) t.innerHTML = S.spam.trackers ? `<span class="chip ok">🛡 ${plural(S.spam.trackers, 'pixel')} de suivi retiré${S.spam.trackers > 1 ? 's' : ''}</span>` : '';
   }
 
-  function renderSpamReport() {
-    const r = S.spam.report;
-    body.innerHTML = r.busy ? loading(r.busy) : `<h2>Terminé</h2>${r.report.map(x => `<div class="card"><div class="row"><span class="chip ${x.ok ? 'ok' : 'bad'}">${x.ok ? '✓' : '✗'}</span><code class="grow">${esc(x.query)}</code></div><div class="small muted" style="margin-top:4px">${esc(x.msg)}</div></div>`).join('')}
-      <div class="good">${plural(r.trashed, 'spam')} mis à la corbeille (récupérables 30 jours).</div>`;
-    if (!r.busy) setFooter(`<button class="btn filled" data-act="spam-run">Analyser à nouveau</button>`);
-  }
-
-  async function applySpam() {
-    const d = S.spam.data;
-    const proposals = d.proposals.filter(p => !S.spam.off.has(p.pid)).map(p => {
-      const value = String(S.spam.edits[p.pid] ?? p.cand.value).trim().replace(/^"|"$/g, '');
-      return { cand: { ...p.cand, value }, edited: value !== p.cand.value, coverIds: p.coverIds };
-    }).filter(p => p.cand.value);
-    if (!proposals.length) return;
-    S.spam.report = { busy: 'Création des filtres…' };
+  // Crée les filtres des cartes données (une seule avec « Créer ce filtre », toutes celles cochées sinon) ;
+  // chaque carte affiche ensuite son résultat et la liste reste en place.
+  async function applySpam(cards) {
+    const sp = S.spam;
+    const items = cards.map(p => {
+      const cur = current(p);
+      const value = String(sp.edits[p.pid] ?? cur.cand.value).trim().replace(/^"|"$/g, '');
+      return { pid: p.pid, proposal: { cand: { ...cur.cand, value }, edited: value !== cur.cand.value, coverIds: p.coverIds } };
+    }).filter(x => x.proposal.cand.value);
+    if (!items.length) return;
+    sp.busy = 'Création…';
+    sp.notice = null;
     render();
     try {
-      const r = await call('spam:apply', { proposals, options: S.spam.opts }, t => { S.spam.report.busy = t; if (S.tab === 'spam') render(); });
-      S.spam.report = r;
+      const r = await call('spam:apply', { proposals: items.map(x => x.proposal), options: sp.opts }, t => { sp.busy = t; if (S.tab === 'spam') render(); });
+      r.report.forEach((x, i) => { sp.done[items[i].pid] = x; });
+      const okN = r.report.filter(x => x.ok).length;
+      sp.notice = { ok: okN === r.report.length, text: `${plural(okN, 'filtre')} créé${okN > 1 ? 's' : ''}${r.trashed ? ` · ${plural(r.trashed, 'spam')} mis à la corbeille (récupérables 30 jours)` : ''}.` };
       refreshStatus();
-    } catch (e) { S.spam.report = null; S.spam.error = e.message; }
+    } catch (e) { sp.notice = { ok: false, text: e.message }; }
+    sp.busy = '';
     if (S.tab === 'spam') render();
   }
 
@@ -876,7 +892,9 @@
         break;
       }
       case 'spam-run': loadSpam(); break;
-      case 'spam-apply': applySpam(); break;
+      case 'spam-apply': applySpam(toCreate()); break;
+      case 'spam-one': applySpam(S.spam.data.proposals.filter(p => p.pid === el.dataset.pid)); break;
+      case 'alt': S.spam.alt[el.dataset.pid] = +el.value; delete S.spam.edits[el.dataset.pid]; render(); break;
       case 'sel': S.spam.sel = el.dataset.id; render(); break;
       case 'images': S.spam.images = el.checked; fillPreview(); break;
       case 'pick': el.checked ? S.spam.off.delete(el.dataset.pid) : S.spam.off.add(el.dataset.pid); render(); break;

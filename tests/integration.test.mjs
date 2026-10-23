@@ -87,11 +87,16 @@ await test('dossier Spam : dangerosité, aperçu et filtres proposés', async ()
   assert.deepEqual(Object.keys(d.mails).sort(), ['d1', 'u1', 'w1', 'w2']);
   assert.ok(d.mails.w1.danger.score > d.mails.d1.danger.score, 'le Walmart avec texte caché est plus dangereux');
   assert.match(d.mails.w1.html, /CLAIM YOUR PRIZE/);
-  // que des mots, jamais l'expéditeur ; « votre colis est en attente de récupération » est écarté (vrai mail de La Poste)
-  assert.deepEqual(d.proposals.map(p => p.query), ['subject:"You have received a payment"', '"Payez les frais de douane maintenant"']);
+  // que des mots, jamais l'expéditeur ; « votre colis est en attente de récupération » est écarté (vrai mail de La Poste).
+  // À égalité de spams attrapés, la phrase la plus courte d'abord ; les phrases entières restent proposées.
+  assert.deepEqual(d.proposals.map(p => p.alts[0].query), ['subject:"received a payment"', '"frais de douane"']);
+  assert.ok(d.proposals[0].alts.some(a => a.cand.value === 'You have received a payment'));
+  assert.ok(d.proposals[1].alts.some(a => a.cand.value === 'Payez les frais de douane maintenant'));
+  assert.ok(d.proposals[1].alts.every(a => !/colis est en attente/.test(a.cand.value)));
+  assert.equal(d.proposals[0].alts[0].total, 2);
   assert.deepEqual(d.uncovered, ['u1']);
   assert.ok(!('anthropicKey' in (d.settings || {})));
-  const a = await call('spam:apply', { proposals: d.proposals.map(p => ({ cand: p.cand, edited: false, coverIds: p.coverIds })), options: {} });
+  const a = await call('spam:apply', { proposals: d.proposals.map(p => ({ cand: p.alts[0].cand, edited: false, coverIds: p.coverIds })), options: {} });
   assert.equal(a.trashed, 3);
   assert.equal(store.find(m => m.id === 'n1').labelIds[0], 'INBOX');
 });

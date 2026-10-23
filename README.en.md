@@ -41,7 +41,8 @@ Open an email and click **Filtres** (bottom right):
 
 - each spam with its **danger score** and a **preview** on the right (scripts, links and remote images disabled; images can be shown on request, tracking pixels stay removed);
 - **proposed filters**, each tested against your real mailbox to catch that spam and **0 legitimate emails**: **words only** (exact subject or body phrase), never the sender — spammers change address with every send, not their wording. When nothing safe is found, Claude can suggest some (optional);
-- tick, edit, confirm: filters are created (label `###CACA###` + archive by default), handled spam goes to the trash (recoverable for 30 days).
+- **several proposals per spam**, best first: the one that catches the most spam already received, then the shortest (a short phrase also catches the campaign's variants). Subject filters are exact phrases: `subject:"…"`;
+- **one at a time** ("Créer ce filtre" on each card) or all ticked ones at once: filters are created (label `###CACA###` + archive by default), handled spam goes to the trash (recoverable for 30 days).
 
 ### Simplify my filters
 
