@@ -57,6 +57,18 @@ test('les bons filtres, avec la raison et l’extrait surligné', () => {
   assert.match(f1.preview, /⟦colis est bloqué⟧/);
   assert.deepEqual(f1.rule.actions, ['🏷️ ###CACA###', '📥 archiver']);
 });
+test('entités HTML décodées (&#233;) : correspondance et extrait propre, sans expéditeur', () => {
+  const idx = buildIndexFromRaw_({ labels: [], filters: [
+    { id: 'e1', criteria: { query: '"appel de loyer"' }, action: { addLabelIds: ['TRASH'] } },
+    { id: 'e2', criteria: { query: 'échéance' }, action: { addLabelIds: ['TRASH'] } }] });
+  const loyer = msg('l1', { From: 'no_reply.cptg@ca-servicesimmobiliers.fr', To: 'moi@gmail.com', Subject: 'Mise à disposition de votre appel de loyer' },
+    '<p>Bonjour, veuillez trouver ci-joint votre avis d&#39;&#233;ch&#233;ance du 01/11/2026 &eacute;tabli par l&rsquo;agence.</p>');
+  const r = analyzeThread_(idx, [loyer]);
+  assert.deepEqual(r.matches.map(m => m.rule.id).sort(), ['e1', 'e2']);
+  const p = r.matches.find(m => m.rule.id === 'e1').preview;
+  assert.doesNotMatch(p, /&#|cptg|moi@gmail/);
+  assert.match(r.matches.find(m => m.rule.id === 'e2').preview, /avis d'⟦échéance⟧/);
+});
 test('« pourquoi ce libellé ? » retrouve le filtre approchant', () => {
   const r = explainLabel_(index, [dhl], '###CACA###');
   assert.equal(r.candidates[0].rule.id, 'f4');

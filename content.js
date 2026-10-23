@@ -203,13 +203,16 @@
 
   /* ───────── contexte Gmail ───────── */
 
-  // Fil affiché : l'élément visible portant l'id hexadécimal (identique à l'id de l'API Gmail).
+  // Fil ouvert : l'adresse se termine par l'identifiant du mail (#inbox/FMfcg…, #label/x/FMfcg…), et le titre
+  // de la conversation (h2) porte l'id hexadécimal de l'API Gmail. Dans la liste des mails, chaque ligne porte
+  // aussi un data-legacy-thread-id : on ne les prend jamais.
   function currentThread() {
-    for (const el of document.querySelectorAll('[data-legacy-thread-id]')) {
+    if (!/^[A-Za-z0-9]{16,}$/.test(location.hash.split('/').pop() || '')) return null;
+    for (const el of document.querySelectorAll('h2[data-legacy-thread-id]')) {
       if (el.offsetParent !== null) return { threadId: el.getAttribute('data-legacy-thread-id') };
     }
     for (const el of document.querySelectorAll('[data-legacy-message-id]')) {
-      if (el.offsetParent !== null) return { messageId: el.getAttribute('data-legacy-message-id') };
+      if (el.offsetParent !== null && !el.closest('tr')) return { messageId: el.getAttribute('data-legacy-message-id') };
     }
     return null;
   }
