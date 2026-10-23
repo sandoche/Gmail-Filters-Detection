@@ -52,6 +52,7 @@ Ouvre un mail, clique sur **Filtres** (en bas à droite) :
 - **Recoupements** : un filtre court (`dick`) attrape déjà ce qu'attrapent des filtres plus précis (`"big dick"`, `"dick pills now"`). **Tester sur mes mails** cherche dans ta boîte ce que le filtre court attraperait hors spam : rien → les filtres précis sont inutiles ; des vrais mails (« Moby Dick ») → il est trop large, on garde les phrases précises.
 - **Fusions** : des filtres simples aux mêmes actions regroupés en un seul `"a" OR "b" OR …`.
 - Avant toute modification, **une sauvegarde XML de tous tes filtres est téléchargée** (réimportable dans Gmail → Paramètres → Filtres → Importer). Les opérations sont faites une par une et reprennent là où elles en étaient si le navigateur coupe.
+- **L’API Gmail ne crée plus de filtre au-delà de 1 000 par compte** (« Too many filters »), même si l’interface de Gmail en accepte davantage. Au-dessus, les suppressions marchent, mais les fusions et « Créer ce filtre » échouent sans rien supprimer : une fusion crée toujours le nouveau filtre avant d’effacer les anciens.
 
 ### Tendances : d'où vient tout ce spam ?
 

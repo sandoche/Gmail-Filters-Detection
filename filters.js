@@ -24,8 +24,10 @@ async function saveRaw(r) {
   await chrome.storage.local.set({ gfmFilters: r });
 }
 
+export const FILTER_LIMIT = 1000;   // l'API Gmail refuse toute création au-delà (« Too many filters ») ; l'interface web, non
+
 export function status() {
-  return raw ? { count: raw.filters.length, apiCount: raw.apiCount || raw.filters.length, unstable: !!raw.unstable, builtAt: raw.builtAt } : null;
+  return raw ? { count: raw.filters.length, limit: FILTER_LIMIT, apiCount: raw.apiCount || raw.filters.length, unstable: !!raw.unstable, builtAt: raw.builtAt } : null;
 }
 
 export async function getIndex(post) {
@@ -213,7 +215,7 @@ export async function createFilter({ field, value, target, archive, markRead }, 
   if (dup) throw new Error(`Ce filtre existe déjà : ${dup.description} → ${dup.actions.join(', ')}`);
 
   post('Création du filtre…');
-  const created = await api('settings/filters', { method: 'POST', body: { criteria, action } });
+  const created = await api('settings/filters', { method: 'POST', body: { criteria, action } }).catch(e => { throw tooManyHint(e); });
   await cacheAdd([created], newLabels);
   return { rule: ruleView(index.rules.find(r => r.id === created.id)), status: status() };
 }
@@ -259,37 +261,69 @@ export async function backup(_, post) {
 }
 
 /**
+ * Enregistre la sauvegarde XML par le gestionnaire de téléchargements et attend qu'elle soit écrite.
+ * (Un lien blob créé dans la page Gmail est ignoré comme téléchargement : Brave l'ouvre dans un onglet.)
+ */
+export async function saveBackup({ name }, post) {
+  const { xml, count } = await backup(null, post);
+  post('Enregistrement de la sauvegarde…');
+  const bytes = new TextEncoder().encode(xml);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  const id = await chrome.downloads.download({ url: 'data:application/xml;base64,' + btoa(bin), filename: name, conflictAction: 'uniquify', saveAs: false });
+  for (let i = 0; i < 120; i++) {
+    const [d] = await chrome.downloads.search({ id });
+    if (d && d.state === 'complete') return { filename: d.filename, count };
+    if (!d || d.state === 'interrupted') throw new Error(`La sauvegarde de tes filtres n’a pas pu être enregistrée${d ? ` (${d.error})` : ''} : rien n’a été modifié.`);
+    await new Promise(r => setTimeout(r, 250));
+  }
+  throw new Error('La sauvegarde de tes filtres tarde à s’enregistrer : rien n’a été modifié. Vérifie tes téléchargements et réessaie.');
+}
+
+/** Ajoute à l'erreur « trop de filtres » combien il y en a et combien en retirer. */
+function tooManyHint(e) {
+  if (e.tooMany && raw) e.message += ` Tu en as ${raw.filters.length.toLocaleString('fr-FR')} : il faut en retirer au moins ${Math.max(1, raw.filters.length - FILTER_LIMIT + 1).toLocaleString('fr-FR')}.`;
+  return e;
+}
+
+async function removeFilter(id) {
+  try { await api(`settings/filters/${id}`, { method: 'DELETE' }); } catch (e) { if (e.status !== 404) throw e; }
+}
+
+/**
  * Applique une liste d'opérations validées, une par une (l'API Gmail freine les rafales) :
- *   { type: 'delete', id }  |  { type: 'merge', criteria, action, ids }  (crée le filtre fusionné, puis supprime ids)
+ *   { type: 'delete', id }  |  { type: 'merge', criteria, action, ids }
+ * Les suppressions passent avant les fusions. Une fusion crée le filtre fusionné, puis seulement supprime ids :
+ * si l'API refuse la création (« Too many filters »), les anciens filtres restent.
  * La progression est gardée dans chrome.storage.local : si le navigateur coupe, « Reprendre » repart de là.
  */
 export async function applyOps({ ops, resume }, post) {
-  let job = resume ? (await chrome.storage.local.get('gfmJob')).gfmJob : { ops, next: 0, ok: 0, errors: [], startedAt: Date.now() };
+  let job = resume ? (await chrome.storage.local.get('gfmJob')).gfmJob
+    : { ops: [...ops].sort((a, b) => (a.type === 'merge') - (b.type === 'merge')), next: 0, ok: 0, errors: [], startedAt: Date.now() };
   if (!job) throw new Error('Aucune simplification en cours.');
   const save = () => chrome.storage.local.set({ gfmJob: job });
+  const createMerged = async op => {
+    const created = await api('settings/filters', { method: 'POST', body: { criteria: op.criteria, action: op.action } });
+    op.createdId = created.id;
+    await save();
+    await cacheAdd([created]);
+  };
   await save();
   while (job.next < job.ops.length) {
     const op = job.ops[job.next];
     post(`${job.next + 1} / ${job.ops.length} — ${op.type === 'merge' ? `fusion de ${op.ids.length} filtres` : 'suppression'}…`);
     try {
       if (op.type === 'merge') {
-        if (!op.createdId) {
-          const created = await api('settings/filters', { method: 'POST', body: { criteria: op.criteria, action: op.action } });
-          op.createdId = created.id;
-          await save();
-          await cacheAdd([created]);
-        }
-        for (const id of op.ids) {
-          try { await api(`settings/filters/${id}`, { method: 'DELETE' }); } catch (e) { if (e.status !== 404) throw e; }
-        }
+        if (!op.createdId) await createMerged(op);
+        for (const id of op.ids) await removeFilter(id);
         await cacheRemove(op.ids);
       } else {
-        try { await api(`settings/filters/${op.id}`, { method: 'DELETE' }); } catch (e) { if (e.status !== 404) throw e; }
+        await removeFilter(op.id);
         await cacheRemove([op.id]);
       }
       job.ok++;
     } catch (e) {
-      job.errors.push(`${op.type === 'merge' ? op.criteria.query || op.criteria.from : op.id} : ${e.message}`.slice(0, 300));
+      job.errors.push(`${op.type === 'merge' ? op.criteria.query || op.criteria.from : op.id} : ${tooManyHint(e).message}`.slice(0, 400));
     }
     job.next++;
     await save();

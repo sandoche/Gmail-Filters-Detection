@@ -14,6 +14,7 @@ const COMMANDS = {
   'filters:status': async (_, post) => { await filters.getIndex(post); return filters.status(); },
   'filters:reload': filters.reload,
   'filters:backup': filters.backup,
+  'filters:saveBackup': filters.saveBackup,
   'mail:analyze': filters.analyzeMail,
   'mail:explainLabel': filters.explainLabel,
   'mail:claude': filters.claudeExplain,

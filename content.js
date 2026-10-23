@@ -595,7 +595,8 @@
     if (s.loading) { body.innerHTML = loading(s.progress); return; }
     if (s.error) { body.innerHTML = `<div class="err">${esc(s.error)}</div><button class="btn" data-act="plan">Réessayer</button>`; return; }
     if (s.report) {
-      body.innerHTML = s.report.busy ? loading(s.report.busy) : `<div class="good">✓ ${s.report.ok} / ${s.report.total} opération(s) appliquée(s). Tu as maintenant ${s.report.status.count.toLocaleString('fr-FR')} filtres.</div>
+      body.innerHTML = s.report.busy ? loading(s.report.busy) : `${s.saved ? `<div class="small muted">💾 Sauvegarde enregistrée : ${esc(s.saved)}</div>` : ''}
+        <div class="good">✓ ${s.report.ok} / ${s.report.total} opération(s) appliquée(s). Tu as maintenant ${s.report.status.count.toLocaleString('fr-FR')} filtres.</div>
         ${s.report.errors.length ? `<div class="err">${s.report.errors.map(esc).join('\n')}</div>` : ''}`;
       if (!s.report.busy) setFooter(`<button class="btn filled" data-act="plan">Continuer la simplification</button>`);
       return;
@@ -604,10 +605,15 @@
     const p = s.plan;
     const dupN = p.duplicates.reduce((n, d) => n + d.remove.length, 0);
     const mergeN = p.merges.reduce((n, m) => n + m.rules.length - 1, 0);
+    const limit = (p.status && p.status.limit) || 1000;
     let html = `<div class="card soft"><div class="row"><span class="score">${p.total.toLocaleString('fr-FR')}</span><span class="grow">filtres aujourd’hui</span>
         <button class="btn small" data-act="export" title="Fichier réimportable dans Gmail, et utilisable par l'archiveur Thunderbird pour ranger les vieux mails">💾 Exporter mes filtres</button></div>
       <div class="small muted" style="margin-top:6px">${plural(dupN, 'doublon')} · ${plural(p.overlaps.length, 'recoupement')} à arbitrer · jusqu’à ${mergeN} filtres en moins par fusion.
-      Avant toute modification, une sauvegarde XML de tous tes filtres est téléchargée (réimportable dans Gmail → Paramètres → Filtres → Importer).</div></div>`;
+      Avant toute modification, une sauvegarde XML de tous tes filtres est enregistrée dans tes téléchargements (réimportable dans Gmail → Paramètres → Filtres → Importer).</div>
+      ${s.saved ? `<div class="small muted" style="margin-top:4px">💾 Sauvegarde enregistrée : ${esc(s.saved)}</div>` : ''}</div>`;
+    if (p.total >= limit) html += `<div class="note">L’API Gmail, par laquelle passe l’extension, ne crée plus de filtre au-delà de ${limit.toLocaleString('fr-FR')} (« Too many filters ») ; tu en as ${p.total.toLocaleString('fr-FR')}.
+      Les suppressions (doublons, recoupements) marchent ; les fusions et « Créer ce filtre » échoueront sans rien supprimer tant que tu es au-dessus.
+      Doublons supprimés, il en resterait ${(p.total - dupN).toLocaleString('fr-FR')}.</div>`;
     if (p.job) html += `<div class="note">Une simplification a été interrompue : ${p.job.next} / ${p.job.ops.length} faites. <button class="btn small" data-act="resume">Reprendre</button></div>`;
 
     html += `<h2>Doublons</h2><div class="desc">mêmes critères, mêmes actions — on garde le plus ancien</div>`;
@@ -652,12 +658,10 @@
     body.innerHTML = html;
   }
 
-  function download(name, text) {
-    const url = URL.createObjectURL(new Blob([text], { type: 'text/xml' }));
-    const a = document.createElement('a');
-    a.href = url; a.download = name;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  // Enregistrée par le service worker (chrome.downloads) : un lien blob dans Gmail s'ouvre dans un onglet sous Brave.
+  async function saveBackup(onProgress) {
+    const b = await call('filters:saveBackup', { name: `mailFilters_${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')}.xml` }, onProgress);
+    S.simp.saved = `${b.filename} (${plural(b.count, 'filtre')})`;
   }
 
   async function applyOps(ops, resume) {
@@ -666,8 +670,7 @@
     render();
     try {
       if (!S.simp.backupDone) {
-        const b = await call('filters:backup');
-        download(`mailFilters_${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')}.xml`, b.xml);
+        await saveBackup(t => { S.simp.report.busy = t; if (S.tab === 'simp') render(); });
         S.simp.backupDone = true;
       }
       S.simp.report = await call('simplify:apply', resume ? { resume: true } : { ops }, t => { S.simp.report.busy = t; if (S.tab === 'simp') render(); });
@@ -919,10 +922,9 @@
         break;
       case 'resume': applyOps([], true); break;
       case 'export':
-        try {
-          const b = await call('filters:backup');
-          download(`mailFilters_${new Date().toISOString().slice(0, 10)}.xml`, b.xml);
-        } catch (err) { S.simp.error = err.message; render(); }
+        try { await saveBackup(); }
+        catch (err) { S.simp.error = err.message; }
+        render();
         break;
       case 'dup': { const i = +el.dataset.i; el.checked ? S.simp.dupOff.delete(i) : S.simp.dupOff.add(i); break; }
       case 'merge': { const i = +el.dataset.i; el.checked ? S.simp.mergeOn.add(i) : S.simp.mergeOn.delete(i); render(); break; }

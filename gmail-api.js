@@ -106,8 +106,13 @@ export async function api(path, { method = 'GET', body, params } = {}, attempt =
     return api(path, { method, body, params }, attempt + 1);
   }
   if (!res.ok) {
-    const err = new Error(`Gmail ${res.status} : ${await res.text()}`);
+    const text = await res.text();
+    const err = new Error(`Gmail ${res.status} : ${text}`);
     err.status = res.status;
+    if (/Too many filters/i.test(text)) {
+      err.tooMany = true;
+      err.message = 'L’API Gmail (le canal de l’extension) refuse de créer un filtre de plus : elle s’arrête à 1 000 filtres par compte, même si l’interface de Gmail en accepte davantage. Supprime des doublons ou des recoupements dans l’onglet Simplifier, ou crée ce filtre à la main dans Gmail.';
+    }
     throw err;
   }
   return res.status === 204 ? null : res.json().catch(() => null);

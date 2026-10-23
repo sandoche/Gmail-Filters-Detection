@@ -52,6 +52,7 @@ Open an email and click **Filtres** (bottom right):
 - **Overlaps**: a short filter (`dick`) already catches what more precise ones catch (`"big dick"`, `"dick pills now"`). **Test on my emails** searches your mailbox for what the short filter would catch outside spam: nothing → the precise filters are useless; real emails ("Moby Dick") → it is too broad, keep the precise phrases.
 - **Merges**: simple filters with the same actions combined into one `"a" OR "b" OR …`.
 - Before any change, **an XML backup of all your filters is downloaded** (re-importable in Gmail → Settings → Filters → Import). Operations run one at a time and resume where they stopped if the browser is closed.
+- **The Gmail API stops creating filters beyond 1,000 per account** (“Too many filters”), even though the Gmail web interface accepts more. Above that, deletions work, but merges and “Create this filter” fail without deleting anything: a merge always creates the new filter before removing the old ones.
 
 ### Trends: where does all this spam come from?
 
