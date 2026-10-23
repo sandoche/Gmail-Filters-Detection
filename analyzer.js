@@ -91,7 +91,8 @@ export function htmlToText(html) {
     .trim();
 }
 
-export function bodyText(payload) {
+// Corps texte et HTML d'un message (format=full), pièces jointes exclues.
+export function bodyParts(payload) {
   let plain = '', html = '';
   (function walk(p) {
     if (!p) return;
@@ -99,7 +100,12 @@ export function bodyText(payload) {
     else if (p.mimeType === 'text/html' && p.body && p.body.data) html += decodeB64Url(p.body.data) + '\n';
     for (const c of p.parts || []) walk(c);
   })(payload);
-  return plain.trim() || htmlToText(html);
+  return { plain: plain.trim(), html: html.trim() };
+}
+
+export function bodyText(payload) {
+  const { plain, html } = bodyParts(payload);
+  return plain || htmlToText(html);
 }
 
 // Découpe un texte en suites de « vrais » mots (sans chiffres, sans homoglyphes, sans le nom de l'utilisateur).

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Gmail – Traiter mes spams",
-  "version": "1.0.0",
-  "description": "Analyse le dossier Spam, propose des filtres Gmail sûrs (0 mail légitime), crée les filtres après validation et met les spams traités à la corbeille.",
+  "name": "Gmail – Filtres, spams et pistage",
+  "version": "2.0.0",
+  "description": "Pourquoi ce mail a ce filtre, dangerosité des spams, filtres proposés automatiquement, simplification des filtres et blocage des pixels de suivi.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqiXr7mwjgiYyKYSR5HBDioWlKgTJwsH74oXMnXGf8KGOOZKVnaiZKzxFsYS7x4ArCRBaoKgqe46GIe6PIOxMryFP1QeKON42NPgnb+kBMd4UPy1H4+0/13iknGEFONZQk2nD/w+DCthgWHuYVL1v6LxS1g0Oz8h9dseWS8hY6I/cNungpiM30M8Q1s6wN3dClmsnlN34ISGyGrsdNkI6/z9pKa7+Z+uu4yRyrjwM9L/CVMwv0dqGEDjUYxDaLkuAtjh0dTspWgwTsrdu7VMcV4Kh25kNakEz+Tt0Cxyi92DOmNhmLZmGl9L79bJmBSE+k7TO65O5fXCzpWdAvZKCswIDAQAB",
   "permissions": ["identity", "storage"],
   "host_permissions": [
@@ -19,9 +19,10 @@
   },
   "background": { "service_worker": "background.js", "type": "module" },
   "content_scripts": [
+    { "matches": ["https://mail.google.com/*"], "js": ["tracking.js"], "run_at": "document_start" },
     { "matches": ["https://mail.google.com/*"], "js": ["content.js"], "run_at": "document_idle" }
   ],
-  "action": { "default_title": "Traiter mes spams", "default_icon": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png" } },
+  "action": { "default_title": "Filtres Gmail", "default_icon": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png" } },
   "icons": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" },
   "options_page": "options.html"
 }

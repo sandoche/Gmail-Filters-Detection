@@ -1,181 +1,931 @@
-// Bouton « Traiter mes spams » + panneau de validation, injectés dans Gmail (Shadow DOM isolé du CSS de Gmail).
+// Panneau latéral dans Gmail (Shadow DOM, isolé du CSS de Gmail) :
+//   « Ce mail »    pourquoi ce mail a ces filtres / libellés, dangerosité, créer ou supprimer un filtre ;
+//   « Spams »      dangerosité de chaque spam, aperçu, filtres proposés (testés à 0 mail légitime) ;
+//   « Simplifier » doublons, recoupements (« dick » / « big dick ») testés sur tes vrais mails, fusions.
+// Toute la logique tourne dans le service worker (background.js) ; ici, uniquement l'affichage.
 (() => {
   if (window.__spamFiltreur) return;
   window.__spamFiltreur = true;
+
+  const log = (...a) => console.log('[Traiter mes spams]', ...a);
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const mark = s => esc(s).replace(/⟦/g, '<mark>').replace(/⟧/g, '</mark>');   // ⟦phrase⟧ → surlignage
+  const plural = (n, w) => `${n} ${w}${n > 1 ? 's' : ''}`;
+  const fmtDate = t => t ? new Date(t).toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' }) : '';
+  const ago = t => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'à l’instant' : m < 60 ? `il y a ${m} min` : m < 1440 ? `il y a ${Math.round(m / 60)} h` : `il y a ${Math.round(m / 1440)} j`; };
+  const nameOf = from => { const m = String(from || '').match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>/); return m ? { name: m[1] || m[2], email: m[2] } : { name: from || '', email: from || '' }; };
+  const gmailBase = () => location.origin + ((location.pathname.match(/^\/mail\/u\/\d+\//) || ['/mail/u/0/'])[0]);
+  const searchUrl = q => `${gmailBase()}#search/${encodeURIComponent(q)}`;
+
+  /* ───────── échanges avec le service worker ───────── */
+
+  let port = null, rid = 0;
+  const pending = new Map();
+  const LOST = 'La connexion avec l’extension a été perdue (extension rechargée ou arrêtée). Recharge Gmail (F5) puis réessaie.';
+
+  function connect() {
+    if (port) return port;
+    port = chrome.runtime.connect({ name: 'gfm' });
+    port.onMessage.addListener(m => {
+      const p = pending.get(m.rid);
+      if (!p) return;
+      if (m.type === 'progress') { log(m.text); p.onProgress && p.onProgress(m.text); return; }
+      pending.delete(m.rid);
+      m.type === 'error' ? p.reject(new Error(m.text)) : p.resolve(m.data);
+    });
+    port.onDisconnect.addListener(() => {
+      port = null;
+      log('Connexion avec l’extension perdue.', chrome.runtime.lastError || '');
+      for (const p of pending.values()) p.reject(new Error(LOST));
+      pending.clear();
+    });
+    return port;
+  }
+
+  function call(cmd, args, onProgress) {
+    return new Promise((resolve, reject) => {
+      const id = ++rid;
+      pending.set(id, { resolve, reject, onProgress });
+      try { connect().postMessage({ rid: id, cmd, args }); }
+      catch (e) { pending.delete(id); reject(new Error('L’extension a été rechargée depuis l’ouverture de Gmail. Recharge Gmail (F5) puis réessaie.')); }
+    });
+  }
+
+  /* ───────── interface ───────── */
 
   const host = document.createElement('div');
   host.id = 'spam-filtreur-host';
   document.documentElement.appendChild(host);
   const root = host.attachShadow({ mode: 'open' });
-
-  root.innerHTML = `
-  <style>
+  root.innerHTML = `<style>
     :host { all: initial; }
-    * { box-sizing: border-box; font-family: "Google Sans", Roboto, Arial, sans-serif; }
-    .fab { position: fixed; right: 24px; bottom: 24px; z-index: 2147483000; background: #c5221f; color: #fff;
-      border: 0; border-radius: 24px; padding: 12px 18px; font-size: 14px; font-weight: 600; cursor: pointer;
-      box-shadow: 0 2px 8px rgba(0,0,0,.3); }
-    .fab:hover { background: #a50e0e; }
-    .back { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 2147483001; display: none;
-      align-items: center; justify-content: center; }
-    .back.open { display: flex; }
-    .panel { background: #fff; color: #202124; width: min(860px, 94vw); max-height: 88vh; border-radius: 12px;
-      display: flex; flex-direction: column; box-shadow: 0 8px 30px rgba(0,0,0,.35); }
-    header { padding: 16px 20px; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center; }
-    header h2 { margin: 0; font-size: 18px; }
-    .x { background: none; border: 0; font-size: 22px; cursor: pointer; color: #5f6368; }
-    main { padding: 16px 20px; overflow: auto; font-size: 13px; }
-    footer { font-size: 13px; padding: 12px 20px; border-top: 1px solid #e0e0e0; display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; align-items: center; }
-    .btn { border: 1px solid #dadce0; background: #fff; border-radius: 6px; padding: 8px 14px; cursor: pointer; font-size: 13px; }
-    .btn.primary { background: #1a73e8; color: #fff; border-color: #1a73e8; }
-    .btn:disabled { opacity: .5; cursor: default; }
-    .prog { color: #5f6368; padding: 24px 0; text-align: center; }
-    .card { border: 1px solid #e0e0e0; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
-    .card.off { opacity: .5; }
-    .row { display: flex; gap: 10px; align-items: center; }
-    .crit { flex: 1; font-family: Consolas, monospace; font-size: 13px; padding: 6px 8px; border: 1px solid #dadce0; border-radius: 4px; }
-    .tag { font-size: 11px; background: #e8f0fe; color: #1967d2; border-radius: 10px; padding: 2px 8px; white-space: nowrap; }
-    .tag.ok { background: #e6f4ea; color: #137333; }
-    .tag.claude { background: #fef7e0; color: #b06000; }
-    ul { margin: 6px 0 0 26px; padding: 0; color: #5f6368; }
-    li { margin: 2px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .opts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; background: #f8f9fa; border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
-    .opts label { display: flex; gap: 6px; align-items: center; }
-    .opts input[type=text] { padding: 4px 6px; border: 1px solid #dadce0; border-radius: 4px; }
-    h3 { font-size: 14px; margin: 16px 0 8px; }
-    .warn { color: #b06000; }
-    .err { color: #c5221f; white-space: pre-wrap; }
-    .good { color: #137333; }
-    a { color: #1a73e8; }
+    * { box-sizing: border-box; }
+    .ui { font: 14px/1.45 "Google Sans Text", "Google Sans", Roboto, Arial, sans-serif; color: #1f1f1f;
+      --primary: #0b57d0; --on-primary: #fff; --tonal: #d3e3fd; --on-tonal: #041e49; --surface: #fff; --soft: #f0f4f9;
+      --line: #e1e3e1; --muted: #5e5e5e; --red: #b3261e; --red-soft: #fce8e6; --amber: #8c5000; --amber-soft: #fef7e0;
+      --green: #146c2e; --green-soft: #e6f4ea; --mark: #fde293; }
+    button { font: inherit; cursor: pointer; }
+    .fab { position: fixed; right: 20px; bottom: 20px; z-index: 2147483000; display: flex; align-items: center; gap: 8px;
+      height: 48px; padding: 0 18px 0 14px; border: 0; border-radius: 16px; background: var(--tonal); color: var(--on-tonal);
+      font-weight: 500; box-shadow: 0 1px 3px rgba(0,0,0,.3), 0 4px 8px 3px rgba(0,0,0,.15); transition: box-shadow .2s; }
+    .fab:hover { box-shadow: 0 2px 3px rgba(0,0,0,.3), 0 6px 10px 4px rgba(0,0,0,.15); }
+    .fab svg { width: 22px; height: 22px; }
+    .drawer { position: fixed; top: 0; right: 0; height: 100vh; width: min(460px, 100vw); z-index: 2147483001;
+      background: var(--surface); box-shadow: -4px 0 24px rgba(0,0,0,.18); display: flex; flex-direction: column;
+      transform: translateX(105%); transition: transform .22s ease, width .22s ease; }
+    .drawer.open { transform: none; }
+    .drawer.wide { width: min(1080px, 100vw); }
+    header { padding: 14px 12px 0 20px; }
+    .top { display: flex; align-items: center; gap: 8px; }
+    .top h1 { font: 500 18px/1.3 "Google Sans", Roboto, Arial, sans-serif; margin: 0; flex: 1; }
+    .sub { color: var(--muted); font-size: 12px; margin: 2px 0 10px; }
+    .icon { width: 36px; height: 36px; border-radius: 50%; border: 0; background: none; color: var(--muted); display: grid; place-items: center; }
+    .icon:hover { background: var(--soft); }
+    .icon svg { width: 20px; height: 20px; }
+    nav { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 0 -12px 0 -20px; padding: 0 12px; }
+    nav button { border: 0; background: none; padding: 10px 14px; color: var(--muted); font-weight: 500; border-bottom: 3px solid transparent; }
+    nav button.on { color: var(--primary); border-bottom-color: var(--primary); }
+    .body { flex: 1; overflow: auto; padding: 16px 20px 24px; }
+    .split { display: grid; grid-template-columns: minmax(380px, 440px) 1fr; height: 100%; }
+    .split > .list { overflow: auto; padding: 16px 20px 24px; border-right: 1px solid var(--line); }
+    .split > .preview { overflow: hidden; display: flex; flex-direction: column; background: var(--soft); }
+    .body.flush { padding: 0; overflow: hidden; }
+    footer { border-top: 1px solid var(--line); padding: 12px 20px; display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+    footer .hint { flex: 1; color: var(--muted); font-size: 12px; }
+    .btn { height: 36px; padding: 0 16px; border-radius: 18px; border: 1px solid #747775; background: none; color: var(--primary); font-weight: 500; }
+    .btn:hover { background: rgba(11,87,208,.06); }
+    .btn.filled { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
+    .btn.filled:hover { background: #0842a0; }
+    .btn.tonal { background: var(--tonal); color: var(--on-tonal); border-color: transparent; }
+    .btn.danger { background: var(--red); color: #fff; border-color: var(--red); }
+    .btn.small { height: 30px; padding: 0 12px; font-size: 13px; }
+    .btn.text { border-color: transparent; padding: 0 10px; }
+    .btn:disabled { opacity: .45; cursor: default; }
+    .card { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; background: var(--surface); }
+    .card.soft { background: var(--soft); border-color: transparent; }
+    .card.off { opacity: .55; }
+    .card.sel { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+    h2 { font: 500 15px/1.3 "Google Sans", Roboto, Arial, sans-serif; margin: 20px 0 10px; display: flex; align-items: center; gap: 8px; }
+    h2:first-child { margin-top: 0; }
+    h2 .count { font-size: 12px; color: var(--muted); font-weight: 400; }
+    .desc { color: var(--muted); font-size: 12px; margin: -6px 0 10px; }
+    .muted { color: var(--muted); }
+    .small { font-size: 12px; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .grow { flex: 1; min-width: 0; }
+    .chip { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 10px; border-radius: 8px; font-size: 12px;
+      background: var(--soft); color: #1f1f1f; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+    .chip.label { background: #e8def8; color: #1d192b; }
+    .chip.ok { background: var(--green-soft); color: var(--green); }
+    .chip.warn { background: var(--amber-soft); color: var(--amber); }
+    .chip.bad { background: var(--red-soft); color: var(--red); }
+    .chip.blue { background: var(--tonal); color: var(--on-tonal); }
+    code, .mono { font-family: "Roboto Mono", Consolas, monospace; font-size: 12.5px; }
+    .crit { background: var(--soft); border-radius: 6px; padding: 4px 8px; word-break: break-word; display: inline-block; }
+    mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 2px; }
+    .excerpt { font-size: 13px; color: #303030; background: #fffbea; border-left: 3px solid #f0c000; padding: 6px 10px; border-radius: 0 6px 6px 0; margin-top: 8px; }
+    .reasons { margin: 6px 0 0; padding: 0; list-style: none; font-size: 13px; }
+    .reasons li::before { content: "✓ "; color: var(--green); font-weight: 700; }
+    .gauge { height: 8px; border-radius: 4px; background: #e9eef6; overflow: hidden; margin: 8px 0 6px; }
+    .gauge > i { display: block; height: 100%; border-radius: 4px; }
+    .score { font: 500 22px/1 "Google Sans", Roboto, Arial, sans-serif; }
+    .badge { flex: none; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 13px; color: #fff; }
+    .finding { display: flex; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; }
+    .finding:first-child { border-top: 0; }
+    .finding > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+    .finding .pts { flex: none; width: 34px; text-align: right; color: var(--muted); font-size: 12px; padding-top: 1px; }
+    .mailrow { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 10px; cursor: pointer; }
+    .mailrow:hover { background: var(--soft); }
+    .mailrow.sel { background: var(--tonal); }
+    .mailrow .who { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .mailrow .what { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .empty { text-align: center; color: var(--muted); padding: 48px 16px; }
+    .empty .big { font-size: 40px; margin-bottom: 8px; }
+    .spinner { width: 28px; height: 28px; border: 3px solid var(--tonal); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 12px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .err { background: var(--red-soft); color: var(--red); border-radius: 12px; padding: 12px 14px; white-space: pre-wrap; margin-bottom: 10px; }
+    .note { background: var(--amber-soft); color: #5c3b00; border-radius: 12px; padding: 10px 14px; margin-bottom: 10px; font-size: 13px; }
+    .good { background: var(--green-soft); color: var(--green); border-radius: 12px; padding: 10px 14px; margin-bottom: 10px; }
+    .claude { background: #f4effa; border-radius: 12px; padding: 12px 14px; white-space: pre-wrap; font-size: 13.5px; }
+    input[type=text], select { height: 36px; border: 1px solid #747775; border-radius: 8px; padding: 0 10px; font: inherit; background: #fff; color: inherit; min-width: 0; }
+    input[type=text]:focus, select:focus { outline: 2px solid var(--primary); outline-offset: -1px; border-color: transparent; }
+    input.crit-edit { width: 100%; font-family: "Roboto Mono", Consolas, monospace; font-size: 12.5px; }
+    label.check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; cursor: pointer; }
+    input[type=checkbox], input[type=radio] { accent-color: var(--primary); width: 16px; height: 16px; margin: 0; }
+    details > summary { cursor: pointer; color: var(--primary); font-size: 13px; font-weight: 500; list-style: none; margin-top: 8px; }
+    details > summary::-webkit-details-marker { display: none; }
+    .pv-head { padding: 16px 20px; background: var(--surface); border-bottom: 1px solid var(--line); }
+    .pv-head h3 { font: 400 18px/1.35 "Google Sans", Roboto, Arial, sans-serif; margin: 0 0 6px; }
+    .pv-frame { flex: 1; border: 0; width: 100%; background: #fff; }
+    .pv-text { flex: 1; overflow: auto; padding: 16px 20px; white-space: pre-wrap; background: #fff; font-size: 13px; }
+    .choice { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; border-radius: 8px; font-size: 13px; cursor: pointer; }
+    .choice:hover { background: var(--soft); }
+    .choice.reco { background: var(--green-soft); }
+    .terms { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+    .tip { position: absolute; width: 220px; background: #1f1f1f; color: #fff; font-size: 12px; padding: 6px 10px; border-radius: 8px; pointer-events: none; z-index: 2; }
+    a { color: var(--primary); text-decoration: none; }
+    a:hover { text-decoration: underline; }
   </style>
-  <button class="fab" title="Analyser le dossier Spam et proposer des filtres">Traiter mes spams</button>
-  <div class="back"><div class="panel">
-    <header><h2>Traiter mes spams</h2><button class="x" title="Fermer">×</button></header>
-    <main></main>
-    <footer></footer>
-  </div></div>`;
+  <div class="ui">
+    <button class="fab" data-act="toggle" title="Pourquoi ce filtre ? · Dangerosité des spams · Simplifier mes filtres">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z"/></svg>Filtres</button>
+    <aside class="drawer" aria-label="Filtres Gmail">
+      <header>
+        <div class="top">
+          <h1>Filtres Gmail</h1>
+          <button class="icon" data-act="reload" title="Relire mes filtres depuis Gmail"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg></button>
+          <button class="icon" data-act="close" title="Fermer (Échap)"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>
+        </div>
+        <div class="sub" id="status">…</div>
+        <nav>
+          <button data-tab="mail">Ce mail</button>
+          <button data-tab="spam">Spams</button>
+          <button data-tab="simp">Simplifier</button>
+          <button data-tab="stats">Tendances</button>
+        </nav>
+      </header>
+      <div class="body" id="body"></div>
+      <footer id="footer" hidden></footer>
+    </aside>
+  </div>`;
 
   const $ = s => root.querySelector(s);
-  const back = $('.back'), main = $('main'), footer = $('footer');
-  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  let port = null, state = null;
+  const drawer = $('.drawer'), body = $('#body'), footer = $('#footer');
 
-  function connect() {
-    if (port) return port;
-    port = chrome.runtime.connect({ name: 'spam' });
-    port.onDisconnect.addListener(() => { port = null; });
-    port.onMessage.addListener(onMsg);
-    return port;
+  const S = {
+    tab: 'mail',
+    status: null, statusError: '',
+    mail: { key: '', loading: false, progress: '', error: '', data: null, explain: {}, claude: null, create: null, confirm: '' },
+    spam: { loading: false, progress: '', error: '', data: null, sel: '', edits: {}, off: new Set(), opts: null, report: null, images: false },
+    simp: { loading: false, progress: '', error: '', plan: null, dupOff: new Set(), choice: {}, tests: {}, mergeOn: new Set(), report: null, backupDone: false },
+    stats: { months: 12, loading: false, progress: '', error: '', data: null, claude: null }
+  };
+
+  /* ───────── contexte Gmail ───────── */
+
+  // Fil affiché : l'élément visible portant l'id hexadécimal (identique à l'id de l'API Gmail).
+  function currentThread() {
+    for (const el of document.querySelectorAll('[data-legacy-thread-id]')) {
+      if (el.offsetParent !== null) return { threadId: el.getAttribute('data-legacy-thread-id') };
+    }
+    for (const el of document.querySelectorAll('[data-legacy-message-id]')) {
+      if (el.offsetParent !== null) return { messageId: el.getAttribute('data-legacy-message-id') };
+    }
+    return null;
+  }
+  const inSpamFolder = () => /^#spam\b/.test(location.hash);
+
+  /* ───────── rendu commun ───────── */
+
+  function loading(text) {
+    return `<div class="empty"><div class="spinner"></div>${esc(text || 'Chargement…')}</div>`;
   }
 
-  function progress(text) { main.innerHTML = `<div class="prog">${esc(text)}</div>`; }
+  function renderStatus() {
+    const s = S.status;
+    $('#status').innerHTML = S.statusError ? `<span style="color:var(--red)">${esc(S.statusError)}</span>`
+      : !s ? 'Lecture de tes filtres…'
+      : `${s.count.toLocaleString('fr-FR')} filtres · lus ${ago(s.builtAt)}` +
+        (s.unstable ? ` · <span style="color:var(--amber)">⚠ Gmail n’en a renvoyé que ${s.apiCount} — <a href="#" data-act="replace">utiliser sa liste</a></span>` : '');
+  }
 
-  function open() {
-    back.classList.add('open');
+  function render() {
+    root.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === S.tab));
+    drawer.classList.toggle('wide', (S.tab === 'spam' && !!S.spam.data && !S.spam.report) || (S.tab === 'stats' && !!S.stats.data));
+    body.classList.toggle('flush', S.tab === 'spam' && !!S.spam.data && !S.spam.report);
+    footer.hidden = true;
     footer.innerHTML = '';
-    progress('Analyse du dossier Spam…');
-    connect().postMessage({ cmd: 'analyze' });
-  }
-  function close() { back.classList.remove('open'); }
-
-  $('.fab').addEventListener('click', open);
-  $('.x').addEventListener('click', close);
-  back.addEventListener('click', e => { if (e.target === back) close(); });
-  chrome.runtime.onMessage.addListener(m => { if (m.cmd === 'open') open(); });
-
-  function onMsg(m) {
-    if (m.type === 'progress') progress(m.text);
-    else if (m.type === 'error') { main.innerHTML = `<p class="err">Erreur : ${esc(m.text)}</p>`; footer.innerHTML = `<button class="btn" id="retry">Réessayer</button>`; $('#retry').onclick = open; }
-    else if (m.type === 'proposals') { state = m; renderProposals(); }
-    else if (m.type === 'applied') renderReport(m.data);
+    if (S.tab === 'mail') renderMail();
+    else if (S.tab === 'spam') renderSpam();
+    else if (S.tab === 'simp') renderSimp();
+    else renderStats();
+    renderStatus();
   }
 
-  function searchLink(query) {
-    return `https://mail.google.com/mail/u/0/#search/${encodeURIComponent(query)}`;
+  function setFooter(html) { footer.innerHTML = html; footer.hidden = false; }
+
+  function dangerBlock(d, full) {
+    const findings = full ? d.findings : d.findings.slice(0, 3);
+    return `<div class="card">
+      <div class="row" style="flex-wrap:nowrap"><span class="score" style="color:${d.color}">${d.score}<span class="small muted">/100</span></span>
+        <b style="color:${d.color}">${esc(d.verdict)}</b></div>
+      <div class="gauge"><i style="width:${d.score}%;background:${d.color}"></i></div>
+      ${d.auth && (d.auth.spf || d.auth.dmarc) ? `<div style="margin-bottom:6px"><span class="chip ${d.auth.dmarc === 'fail' ? 'bad' : d.auth.dmarc === 'pass' ? 'ok' : ''}" title="Authentification de l’expéditeur">SPF ${esc(d.auth.spf || '?')} · DKIM ${esc(d.auth.dkim || '?')} · DMARC ${esc(d.auth.dmarc || '?')}</span></div>` : ''}
+      ${findings.length ? findings.map(f => `<div class="finding"><span class="pts">+${f.points}</span><span>${f.icon} <b>${esc(f.title)}</b>${f.detail ? `<br><span class="muted small">${esc(f.detail)}</span>` : ''}</span></div>`).join('')
+        : '<div class="muted small">Pas de texte caché, pas de mots découpés, expéditeur cohérent.</div>'}
+      ${!full && d.findings.length > 3 ? `<details><summary>Voir les ${d.findings.length} indices</summary>${d.findings.slice(3).map(f => `<div class="finding"><span class="pts">+${f.points}</span><span>${f.icon} <b>${esc(f.title)}</b>${f.detail ? `<br><span class="muted small">${esc(f.detail)}</span>` : ''}</span></div>`).join('')}</details>` : ''}
+    </div>`;
   }
 
-  function renderProposals() {
-    const { data, settings: s } = state;
-    let html = `<p>${data.total} mail(s) dans le Spam — ${data.skipped} déjà en <b>${esc(s.labelName)}</b> ignoré(s).</p>`;
-    if (!data.proposals.length && !data.uncovered.length) {
-      main.innerHTML = html + '<p class="good">Rien à traiter.</p>';
-      footer.innerHTML = '<button class="btn" id="close2">Fermer</button>';
-      $('#close2').onclick = close;
+  /* ═════════════ onglet « Ce mail » ═════════════ */
+
+  async function loadMail(force) {
+    const ctx = currentThread();
+    const key = ctx ? (ctx.threadId || ctx.messageId) : '';
+    if (!ctx) { S.mail = { ...S.mail, key: '', data: null, error: '', loading: false }; render(); return; }
+    if (!force && key === S.mail.key && (S.mail.data || S.mail.loading)) return;
+    S.mail = { key, loading: true, progress: 'Lecture du mail…', error: '', data: null, explain: {}, claude: null, create: null, confirm: '' };
+    render();
+    try {
+      const data = await call('mail:analyze', ctx, t => { S.mail.progress = t; if (S.tab === 'mail') render(); });
+      if (S.mail.key !== key) return;            // l'utilisateur a changé de mail entre-temps
+      S.mail.data = data;
+      S.status = data.status;
+    } catch (e) { if (S.mail.key === key) S.mail.error = e.message; }
+    S.mail.loading = false;
+    if (S.tab === 'mail') render();
+  }
+
+  function filterCard(m, i, n) {
+    const r = m.rule;
+    const confirm = S.mail.confirm === r.id;
+    return `<div class="card">
+      <div class="row small muted">Filtre ${i + 1}/${n}${m.messages && S.mail.data.mail.count > 1 ? ` · message${m.messages.length > 1 ? 's' : ''} #${m.messages.join(', #')}` : ''}</div>
+      <div style="margin:6px 0"><code class="crit">${esc(r.description)}</code></div>
+      <div class="row">${r.actions.map(a => `<span class="chip ${/^🏷️/.test(a) ? 'label' : /corbeille/.test(a) ? 'bad' : ''}">${esc(a)}</span>`).join('') || '<span class="chip">aucune action</span>'}</div>
+      <ul class="reasons">${m.reasons.map(x => `<li>${esc(x.replace(/^✅ /, ''))}</li>`).join('')}</ul>
+      ${m.preview ? `<div class="excerpt">${mark(m.preview)}</div>` : ''}
+      <div class="row" style="margin-top:10px">
+        <a class="btn small text" href="${esc(searchUrl(r.queryText))}" target="_blank" rel="noopener">Tous les mails qu’il attrape ↗</a>
+        <span class="grow"></span>
+        ${confirm ? `<span class="small" style="color:var(--red)">Supprimer définitivement ?</span>
+          <button class="btn small text" data-act="del-cancel">Annuler</button>
+          <button class="btn small danger" data-act="del-ok" data-id="${esc(r.id)}">Supprimer</button>`
+        : `<button class="btn small" data-act="del" data-id="${esc(r.id)}">Supprimer ce filtre</button>`}
+      </div>
+    </div>`;
+  }
+
+  function createForm() {
+    const c = S.mail.create;
+    const d = S.mail.data;
+    if (!c) return `<button class="btn tonal" data-act="create-open">＋ Créer un filtre depuis ce mail</button>`;
+    const labels = d.labelNames || [];
+    return `<div class="card soft">
+      <div class="row" style="margin-bottom:8px">
+        <select data-bind="create.field">
+          ${[['query', 'Phrase dans le mail'], ['subject', 'Phrase dans l’objet'], ['from', 'Expéditeur']].map(([v, t]) => `<option value="${v}" ${c.field === v ? 'selected' : ''}>${t}</option>`).join('')}
+        </select>
+        <input type="text" class="grow" data-bind="create.value" value="${esc(c.value)}" placeholder="ex. colis est bloqué au dépôt">
+      </div>
+      <div class="row" style="margin-bottom:8px">
+        <span class="small muted">Action</span>
+        <select data-bind="create.target" class="grow">
+          ${[c.defaultLabel, ...labels.filter(l => l !== c.defaultLabel)].map(l => `<option value="${esc(l)}" ${c.target === l ? 'selected' : ''}>🏷️ ${esc(l)}</option>`).join('')}
+          <option value="__TRASH__" ${c.target === '__TRASH__' ? 'selected' : ''}>🗑️ Corbeille</option>
+        </select>
+      </div>
+      <div class="row" style="margin-bottom:10px">
+        <label class="check"><input type="checkbox" data-bind="create.archive" ${c.archive ? 'checked' : ''}> Archiver</label>
+        <label class="check"><input type="checkbox" data-bind="create.markRead" ${c.markRead ? 'checked' : ''}> Marquer comme lu</label>
+      </div>
+      ${c.error ? `<div class="err">${esc(c.error)}</div>` : ''}
+      ${c.test ? (c.test.count ? `<div class="note">⚠ Ce filtre attraperait aussi <b>${c.test.count}${c.test.capped ? '+' : ''}</b> mail(s) hors spam :<br>${c.test.samples.map(s => `• ${esc(nameOf(s.from).name)} — ${esc(s.subject)}`).join('<br>')}</div>`
+        : `<div class="good">✓ Aucun autre mail touché (hors Spam, Corbeille et ce libellé).</div>`) : ''}
+      ${c.done ? `<div class="good">✓ Filtre créé : <code>${esc(c.done)}</code><br><span class="small">Il s’appliquera aux prochains mails.</span></div>` : ''}
+      <div class="row">
+        <span class="grow small muted">${c.busy ? esc(c.busy) : ''}</span>
+        <button class="btn small text" data-act="create-close">Fermer</button>
+        <button class="btn small" data-act="create-test" ${c.busy ? 'disabled' : ''}>Tester</button>
+        <button class="btn small filled" data-act="create-go" ${c.busy ? 'disabled' : ''}>Créer le filtre</button>
+      </div>
+    </div>`;
+  }
+
+  // Pixels neutralisés par tracking.js dans le mail affiché, et liens qui passent par un compteur de clics.
+  function trackingBlock(links) {
+    const t = window.__gfmTracking;
+    const visible = b => { const c = b.img.closest('.a3s, [data-legacy-message-id], [data-message-id]'); return b.img.isConnected && c && c.offsetParent !== null; };
+    const blocked = t ? t.blocked.filter(visible) : [];
+    const clickHosts = [...new Set((links || []).map(l => l.host).filter(h => h && t && t.CLICK_TRACKERS.test(h)))];
+    let html = '<div class="card">';
+    if (t && !t.enabled) html += `<div class="note">Le blocage des pixels de suivi est désactivé dans les <a href="#" data-act="options">options</a>.</div>`;
+    html += blocked.length
+      ? `<div class="row"><span class="chip ok">🛡 ${plural(blocked.length, 'pixel')} de suivi bloqué${blocked.length > 1 ? 's' : ''}</span><span class="small muted grow">l’expéditeur ne saura pas que tu as ouvert ce mail</span></div>
+         ${blocked.map(b => `<div class="finding"><span class="pts">🛡</span><span><b>${esc(b.host || '?')}</b> — ${esc(b.reason)}<br><span class="muted small mono">${esc(b.url.slice(0, 90))}${b.url.length > 90 ? '…' : ''}</span></span></div>`).join('')}`
+      : `<div class="small muted">Aucun pixel de suivi détecté dans ce mail.</div>`;
+    if (clickHosts.length) html += `<div class="finding" style="margin-top:6px"><span class="pts">🔗</span><span><b>Liens pistés</b> : les liens passent par ${clickHosts.map(esc).join(', ')} — l’expéditeur saura si tu cliques.</span></div>`;
+    return html + '</div>';
+  }
+
+  function renderMail() {
+    const m = S.mail;
+    if (m.loading) { body.innerHTML = loading(m.progress); return; }
+    if (m.error) { body.innerHTML = `<div class="err">${esc(m.error)}</div><button class="btn" data-act="mail-retry">Réessayer</button>`; return; }
+    if (!m.data) {
+      body.innerHTML = `<div class="empty"><div class="big">📭</div><b>Ouvre un mail</b><br>pour voir quels filtres il déclenche, pourquoi, et s’il est dangereux.
+        <div style="margin-top:20px" class="row" ><span class="grow"></span>
+        <button class="btn tonal" data-tab="spam">Analyser le dossier Spam</button><button class="btn" data-tab="simp">Simplifier mes filtres</button><span class="grow"></span></div></div>`;
       return;
     }
-    html += `<div class="opts">
-      <label>Libellé <input type="text" id="o-label" value="${esc(s.labelName)}"></label>
-      <label><input type="checkbox" id="o-archive" ${s.archive ? 'checked' : ''}> Ne pas afficher dans la boîte de réception</label>
-      <label><input type="checkbox" id="o-trash" ${s.trashAfter ? 'checked' : ''}> Mettre à la corbeille les spams traités</label>
-      <label><input type="checkbox" id="o-existing" ${s.applyExisting ? 'checked' : ''}> Appliquer aussi aux conversations correspondantes</label>
+    const d = m.data, mail = d.mail, who = nameOf(mail.from);
+    const where = mail.system.includes('SPAM') ? ['Spam', 'bad'] : mail.system.includes('TRASH') ? ['Corbeille', 'bad'] : mail.system.includes('INBOX') ? ['Boîte de réception', 'blue'] : ['Archivé', ''];
+    let html = `<div class="card soft">
+      <div style="font:500 16px/1.35 'Google Sans',Roboto,Arial,sans-serif">${esc(mail.subject || '(sans objet)')}</div>
+      <div class="small muted" style="margin:4px 0 8px">${esc(who.name)} &lt;${esc(who.email)}&gt; · ${esc(fmtDate(mail.date))}${mail.count > 1 ? ` · ${mail.count} messages` : ''}</div>
+      <div class="row"><span class="chip ${where[1]}">${where[0]}</span>${mail.labels.map(l => `<span class="chip label">🏷️ ${esc(l)}</span>`).join('')}</div>
     </div>`;
-    if (data.proposals.length) html += `<h3>Filtres proposés (${data.proposals.length})</h3>`;
-    for (const p of data.proposals) {
-      const tags = [
-        `<span class="tag ok">0 mail légitime</span>`,
-        `<span class="tag">${p.covers.length} spam(s) ici</span>`,
-        p.cand.byClaude ? '<span class="tag claude">Claude</span>' : ''
-      ].join(' ');
-      html += `<div class="card" data-pid="${p.pid}">
-        <div class="row">
-          <input type="checkbox" class="acc" checked title="Créer ce filtre">
-          <input class="crit" value="${esc(p.cand.value)}" data-orig="${esc(p.cand.value)}" title="${esc(p.cand.label)}">
-          <span class="tag">${esc(p.cand.label)}</span>
+
+    html += `<h2>Pourquoi ces filtres ? <span class="count">${plural(d.matches.length, 'filtre')} sur ${d.ruleCount.toLocaleString('fr-FR')} · ${d.elapsedMs} ms</span></h2>`;
+    if (!d.matches.length) {
+      html += `<div class="card"><b>Aucun de tes filtres ne correspond à ce mail.</b><div class="muted small" style="margin-top:4px">Libellé posé à la main, filtre supprimé ou modifié depuis l’arrivée du mail, ou nuance de Gmail (racines de mots, texte dans une image) que le moteur ne voit pas.</div></div>`;
+    }
+    html += d.matches.map((x, i) => filterCard(x, i, d.matches.length)).join('');
+
+    if (d.unexplained.length) {
+      html += `<h2>Libellé${d.unexplained.length > 1 ? 's' : ''} sans filtre exact <span class="count">${d.unexplained.length}</span></h2>
+        <div class="muted small" style="margin:-4px 0 10px">Présent sur le mail, mais aucun filtre ne le déclenche à la lettre : Gmail est plus souple (racines de mots), ou le filtre a changé, ou le libellé a été posé à la main.</div>`;
+      for (const l of d.unexplained) {
+        const ex = m.explain[l];
+        html += `<div class="card"><div class="row"><span class="chip label">🏷️ ${esc(l)}</span><span class="grow"></span>
+          ${!ex ? `<button class="btn small" data-act="explain" data-label="${esc(l)}">Chercher le filtre probable</button>` : ''}</div>
+          ${ex && ex.loading ? `<div class="muted small" style="margin-top:8px">Recherche…</div>` : ''}
+          ${ex && ex.error ? `<div class="err" style="margin-top:8px">${esc(ex.error)}</div>` : ''}
+          ${ex && ex.data ? (ex.data.candidates.length ? ex.data.candidates.map(c => `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">
+              <code class="crit">${esc(c.rule.description)}</code> <span class="chip ${c.score >= 3 ? 'ok' : 'warn'}">${c.score >= 3 ? 'très probable' : 'probable'}</span>
+              <div class="small" style="margin-top:4px">${esc(c.reason)}</div>${c.preview ? `<div class="excerpt">${mark(c.preview)}</div>` : ''}</div>`).join('')
+            : `<div class="muted small" style="margin-top:8px">Aucun des ${ex.data.ruleCount} filtres qui posent ce libellé n’a ses mots dans ce mail : il vient d’ailleurs (posé à la main, filtre supprimé, ou créé après ce mail).</div>`) : ''}
+        </div>`;
+      }
+    }
+
+    html += `<h2>Dangerosité</h2>${dangerBlock(d.scam, false)}`;
+    if (d.scam.hiddenSample) html += `<details><summary>Ce que tu ne vois pas : texte caché (lu par les filtres)</summary><div class="card soft small" style="margin-top:8px">${esc(d.scam.hiddenSample)}</div></details>`;
+    html += `<h2>Pistage</h2>${trackingBlock(d.scam.links)}`;
+
+    html += `<h2>En clair</h2>`;
+    if (!d.claude) html += `<div class="muted small">Ajoute ta clé API Anthropic dans les <a href="#" data-act="options">options</a> pour que Claude t’explique ce tri en quelques phrases.</div>`;
+    else if (!m.claude) html += `<button class="btn tonal" data-act="claude">✦ Expliquer avec Claude</button> <span class="small muted">envoie l’expéditeur, l’objet et un extrait du mail à l’API Anthropic</span>`;
+    else if (m.claude.loading) html += `<div class="claude muted">Claude réfléchit…</div>`;
+    else if (m.claude.error) html += `<div class="err">${esc(m.claude.error)}</div>`;
+    else html += `<div class="claude">${esc(m.claude.text)}</div>`;
+
+    html += `<h2>Créer un filtre</h2>${createForm()}`;
+    body.innerHTML = html;
+  }
+
+  /* ═════════════ onglet « Spams » ═════════════ */
+
+  async function loadSpam() {
+    S.spam = { ...S.spam, loading: true, progress: 'Connexion à Gmail…', error: '', data: null, sel: '', edits: {}, off: new Set(), report: null };
+    render();
+    try {
+      const data = await call('spam:analyze', {}, t => { S.spam.progress = t; if (S.tab === 'spam') render(); });
+      S.spam.data = data;
+      S.spam.opts = { labelName: data.labelName, ...(data.settings || {}) };
+      const ids = Object.keys(data.mails).sort((a, b) => data.mails[b].danger.score - data.mails[a].danger.score);
+      S.spam.sel = ids[0] || '';
+    } catch (e) { S.spam.error = e.message; }
+    S.spam.loading = false;
+    if (S.tab === 'spam') render();
+  }
+
+  function mailRow(id) {
+    const v = S.spam.data.mails[id];
+    if (!v) return '';
+    const who = nameOf(v.from);
+    return `<div class="mailrow ${S.spam.sel === id ? 'sel' : ''}" data-act="sel" data-id="${esc(id)}">
+      <span class="badge" style="background:${v.danger.color}" title="${esc(v.danger.verdict)}">${v.danger.score}</span>
+      <span class="grow"><div class="who">${esc(who.name)}</div><div class="what">${esc(v.subject)}</div></span>
+    </div>`;
+  }
+
+  // HTML du spam rendu inerte : ni script, ni formulaire, ni lien cliquable, ni ressource distante (sauf choix explicite).
+  // Le cadre n'a pas allow-scripts : même un script oublié ici ne s'exécuterait pas.
+  function safeDoc(html, images) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    doc.querySelectorAll('script, iframe, frame, object, embed, form, base, meta, link, noscript').forEach(n => n.remove());
+    doc.querySelectorAll('*').forEach(el => {
+      for (const a of [...el.attributes]) if (/^on/i.test(a.name) || /^\s*javascript:/i.test(a.value)) el.removeAttribute(a.name);
+    });
+    doc.querySelectorAll('a[href]').forEach(a => { a.title = 'Lien : ' + a.getAttribute('href'); a.removeAttribute('href'); a.style.textDecoration = 'underline'; });
+    // Pixels de suivi : retirés même quand les images sont affichées.
+    let trackers = 0;
+    const reason = window.__gfmTracking && window.__gfmTracking.trackerReason;
+    if (reason) doc.querySelectorAll('img[src]').forEach(img => { if (reason(img.getAttribute('src'), img)) { img.remove(); trackers++; } });
+    S.spam.trackers = trackers;
+    const csp = doc.createElement('meta');
+    csp.httpEquiv = 'Content-Security-Policy';
+    csp.content = `default-src 'none'; style-src 'unsafe-inline'; font-src data:; img-src data:${images ? ' https: http:' : ''}`;
+    doc.head.prepend(csp);
+    return '<!doctype html>' + doc.documentElement.outerHTML;
+  }
+
+  function previewPane() {
+    const v = S.spam.data.mails[S.spam.sel];
+    if (!v) return `<div class="empty">Choisis un spam à gauche pour le voir.</div>`;
+    const who = nameOf(v.from);
+    const openUrl = `${gmailBase()}#spam/${v.threadId}`;
+    return `<div class="pv-head">
+        <h3>${esc(v.subject || '(sans objet)')}</h3>
+        <div class="small muted">${esc(who.name)} &lt;${esc(who.email)}&gt; · ${esc(fmtDate(v.date))}</div>
+        <div style="margin-top:12px">${dangerBlock(v.danger, false)}</div>
+        <div class="row small">
+          <label class="check"><input type="checkbox" data-act="images" ${S.spam.images ? 'checked' : ''}> Afficher les images distantes <span class="muted">(préviennent l’expéditeur que tu as ouvert le mail)</span></label>
+          <span id="pv-trackers"></span><span class="grow"></span><a href="${esc(openUrl)}" target="_blank" rel="noopener">Ouvrir dans Gmail ↗</a>
         </div>
-        <div class="row" style="margin-top:6px">${tags}
-          <a href="${searchLink(p.query)}" target="_blank" rel="noopener">voir dans Gmail</a>
-          <span style="color:#5f6368">${esc(p.query)}</span></div>
-        <ul>${p.covers.map(c => `<li><b>${esc(c.from)}</b> — ${esc(c.subject)}</li>`).join('')}</ul>
+      </div>
+      ${v.html ? `<iframe class="pv-frame" sandbox="allow-same-origin" referrerpolicy="no-referrer" title="Aperçu du spam"></iframe>` : `<div class="pv-text">${esc(v.text || v.snippet)}</div>`}`;
+  }
+
+  function renderSpam() {
+    const sp = S.spam;
+    if (sp.loading) { body.innerHTML = loading(sp.progress); return; }
+    if (sp.error) { body.innerHTML = `<div class="err">${esc(sp.error)}</div><button class="btn" data-act="spam-run">Réessayer</button>`; return; }
+    if (!sp.data) {
+      body.innerHTML = `<div class="empty"><div class="big">🛡️</div><b>Dossier Spam</b><br>Dangerosité de chaque spam, et filtres proposés pour qu’ils n’y arrivent plus — testés pour n’attraper aucun vrai mail.<div style="margin-top:20px"><button class="btn filled" data-act="spam-run">Analyser le dossier Spam</button></div></div>`;
+      return;
+    }
+    if (sp.report) { renderSpamReport(); return; }
+    const d = sp.data, o = sp.opts;
+    const count = Object.keys(d.mails).length;
+    if (!count) { body.innerHTML = `<div class="empty"><div class="big">✨</div><b>Rien à traiter</b><br>${d.total} mail(s) dans le Spam, ${d.skipped} déjà en ${esc(d.labelName)}.</div>`; return; }
+
+    let list = `<div class="row small muted" style="margin-bottom:12px">${plural(count, 'spam')} à traiter · ${d.skipped} déjà en ${esc(d.labelName)} ignoré(s)</div>
+      <details class="card soft" style="padding:8px 14px"><summary style="margin:0">Options : libellé <b>${esc(o.labelName)}</b>${o.archive ? ', archivé' : ''}${o.trashAfter ? ', spams à la corbeille' : ''}</summary>
+        <div style="display:grid;gap:8px;margin-top:10px">
+          <label class="check">Libellé <input type="text" data-bind="opts.labelName" value="${esc(o.labelName)}"></label>
+          <label class="check"><input type="checkbox" data-bind="opts.archive" ${o.archive ? 'checked' : ''}> Ne pas afficher dans la boîte de réception</label>
+          <label class="check"><input type="checkbox" data-bind="opts.trashAfter" ${o.trashAfter ? 'checked' : ''}> Mettre à la corbeille les spams traités</label>
+          <label class="check"><input type="checkbox" data-bind="opts.applyExisting" ${o.applyExisting ? 'checked' : ''}> Appliquer aussi aux conversations existantes</label>
+        </div></details>`;
+    if (d.proposals.length) list += `<h2>Filtres proposés <span class="count">${d.proposals.length} · 0 mail légitime chacun</span></h2>`;
+    for (const p of d.proposals) {
+      const off = sp.off.has(p.pid);
+      const kind = p.cand.kind === 'fromname' ? 'Nom affiché' : p.cand.type === 'from' ? 'Expéditeur' : p.cand.type === 'subject' ? 'Objet' : 'Texte du mail';
+      list += `<div class="card ${off ? 'off' : ''}">
+        <div class="row"><input type="checkbox" data-act="pick" data-pid="${p.pid}" ${off ? '' : 'checked'} title="Créer ce filtre">
+          <span class="chip blue">${kind}</span>${p.cand.byClaude ? '<span class="chip warn">✦ Claude</span>' : ''}<span class="grow"></span>
+          <a class="small" href="${esc(searchUrl(p.query))}" target="_blank" rel="noopener">Tester dans Gmail ↗</a></div>
+        <input type="text" class="crit-edit" style="margin:8px 0 4px" data-edit="${p.pid}" value="${esc(sp.edits[p.pid] ?? p.cand.value)}" title="Modifiable : une phrase modifiée est re-testée avant la création">
+        ${p.coverIds.map(mailRow).join('')}
       </div>`;
     }
-    if (data.uncovered.length) {
-      html += `<h3 class="warn">Sans critère sûr (${data.uncovered.length}) — laissés tels quels</h3>
-        <ul>${data.uncovered.map(c => `<li><b>${esc(c.from)}</b> — ${esc(c.subject)}</li>`).join('')}</ul>`;
-      if (!data.claudeUsed) html += `<p class="warn">Ajoute ta clé API Anthropic dans les options de l’extension pour que Claude propose des critères pour ceux-là.</p>`;
+    if (d.uncovered.length) {
+      list += `<h2>Sans critère sûr <span class="count">${d.uncovered.length} · laissés tels quels</span></h2><div class="card">${d.uncovered.map(mailRow).join('')}</div>`;
+      if (!d.claudeUsed) list += `<div class="muted small">Ajoute ta clé API Anthropic dans les <a href="#" data-act="options">options</a> pour que Claude propose des critères pour ceux-là.</div>`;
     }
-    if (data.claudeError) html += `<p class="err">Claude : ${esc(data.claudeError)}</p>`;
-    main.innerHTML = html;
+    if (d.claudeError) list += `<div class="err">Claude : ${esc(d.claudeError)}</div>`;
 
-    root.querySelectorAll('.card').forEach(card => {
-      card.querySelector('.acc').addEventListener('change', e => card.classList.toggle('off', !e.target.checked));
-    });
-
-    footer.innerHTML = `<span style="flex:1;color:#5f6368">Rien n’est créé tant que tu n’as pas validé.</span>
-      <button class="btn" id="cancel">Annuler</button>
-      <button class="btn primary" id="go" ${data.proposals.length ? '' : 'disabled'}>Valider et appliquer</button>`;
-    $('#cancel').onclick = close;
-    $('#go').onclick = doApply;
+    body.innerHTML = `<div class="split"><div class="list">${list}</div><div class="preview">${previewPane()}</div></div>`;
+    fillPreview();
+    const n = d.proposals.filter(p => !sp.off.has(p.pid)).length;
+    setFooter(`<span class="hint">Rien n’est créé tant que tu n’as pas validé.</span>
+      <button class="btn" data-act="spam-run">Relancer l’analyse</button>
+      <button class="btn filled" data-act="spam-apply" ${n ? '' : 'disabled'}>Créer ${plural(n, 'filtre')}</button>`);
   }
 
-  function doApply() {
-    const { data } = state;
-    const proposals = [];
-    root.querySelectorAll('.card').forEach(card => {
-      if (!card.querySelector('.acc').checked) return;
-      const p = data.proposals.find(x => x.pid === card.dataset.pid);
-      const input = card.querySelector('.crit');
-      const value = input.value.trim().replace(/^"|"$/g, '');
-      if (!value) return;
-      const edited = value !== input.dataset.orig;
-      proposals.push({ cand: { ...p.cand, value }, edited, coverIds: p.coverIds });
-    });
+  function fillPreview() {
+    const f = root.querySelector('.pv-frame');
+    const v = S.spam.data && S.spam.data.mails[S.spam.sel];
+    if (!f || !v || !v.html) return;
+    f.srcdoc = safeDoc(v.html, S.spam.images);
+    const t = root.querySelector('#pv-trackers');
+    if (t) t.innerHTML = S.spam.trackers ? `<span class="chip ok">🛡 ${plural(S.spam.trackers, 'pixel')} de suivi retiré${S.spam.trackers > 1 ? 's' : ''}</span>` : '';
+  }
+
+  function renderSpamReport() {
+    const r = S.spam.report;
+    body.innerHTML = r.busy ? loading(r.busy) : `<h2>Terminé</h2>${r.report.map(x => `<div class="card"><div class="row"><span class="chip ${x.ok ? 'ok' : 'bad'}">${x.ok ? '✓' : '✗'}</span><code class="grow">${esc(x.query)}</code></div><div class="small muted" style="margin-top:4px">${esc(x.msg)}</div></div>`).join('')}
+      <div class="good">${plural(r.trashed, 'spam')} mis à la corbeille (récupérables 30 jours).</div>`;
+    if (!r.busy) setFooter(`<button class="btn filled" data-act="spam-run">Analyser à nouveau</button>`);
+  }
+
+  async function applySpam() {
+    const d = S.spam.data;
+    const proposals = d.proposals.filter(p => !S.spam.off.has(p.pid)).map(p => {
+      const value = String(S.spam.edits[p.pid] ?? p.cand.value).trim().replace(/^"|"$/g, '');
+      return { cand: { ...p.cand, value }, edited: value !== p.cand.value, coverIds: p.coverIds };
+    }).filter(p => p.cand.value);
     if (!proposals.length) return;
-    const options = {
-      labelName: $('#o-label').value.trim() || state.settings.labelName,
-      archive: $('#o-archive').checked,
-      trashAfter: $('#o-trash').checked,
-      applyExisting: $('#o-existing').checked
-    };
-    footer.innerHTML = '';
-    progress('Création des filtres…');
-    connect().postMessage({ cmd: 'apply', proposals, options });
+    S.spam.report = { busy: 'Création des filtres…' };
+    render();
+    try {
+      const r = await call('spam:apply', { proposals, options: S.spam.opts }, t => { S.spam.report.busy = t; if (S.tab === 'spam') render(); });
+      S.spam.report = r;
+      refreshStatus();
+    } catch (e) { S.spam.report = null; S.spam.error = e.message; }
+    if (S.tab === 'spam') render();
   }
 
-  function renderReport(r) {
-    main.innerHTML = `<h3>Terminé</h3><ul style="margin-left:0;list-style:none">${r.report.map(x =>
-      `<li class="${x.ok ? 'good' : 'err'}">${x.ok ? '✔' : '✖'} <code>${esc(x.query)}</code> — ${esc(x.msg)}</li>`).join('')}</ul>
-      <p>${r.trashed} spam(s) mis à la corbeille.</p>`;
-    footer.innerHTML = '<button class="btn primary" id="close3">Fermer</button>';
-    $('#close3').onclick = close;
+  /* ═════════════ onglet « Simplifier » ═════════════ */
+
+  async function loadPlan() {
+    S.simp = { ...S.simp, loading: true, progress: 'Analyse de tes filtres…', error: '', plan: null, report: null, tests: {}, choice: {}, dupOff: new Set(), mergeOn: new Set() };
+    render();
+    try {
+      S.simp.plan = await call('simplify:plan', {}, t => { S.simp.progress = t; if (S.tab === 'simp') render(); });
+      S.status = S.simp.plan.status;
+    } catch (e) { S.simp.error = e.message; }
+    S.simp.loading = false;
+    if (S.tab === 'simp') render();
   }
+
+  function testBox(o) {
+    const t = S.simp.tests[o.broad.id];
+    if (!t) return `<button class="btn small" data-act="test-rule" data-id="${esc(o.broad.id)}">Tester sur mes mails</button>`;
+    if (t.loading) return `<span class="small muted">Recherche dans Gmail…</span>`;
+    if (t.error) return `<span class="small" style="color:var(--red)">${esc(t.error)}</span>`;
+    return t.count ? `<div class="note" style="margin:8px 0 0">« ${esc(o.broad.description)} » attrape aussi <b>${t.count}${t.capped ? '+' : ''}</b> mail(s) hors spam :<br>${t.samples.map(s => `• ${esc(nameOf(s.from).name)} — ${esc(s.subject)}`).join('<br>')}</div>`
+      : `<div class="good" style="margin:8px 0 0">✓ « ${esc(o.broad.description)} » n’attrape aucun mail hors spam : les filtres plus précis ne servent à rien.</div>`;
+  }
+
+  function renderSimp() {
+    const s = S.simp;
+    if (s.loading) { body.innerHTML = loading(s.progress); return; }
+    if (s.error) { body.innerHTML = `<div class="err">${esc(s.error)}</div><button class="btn" data-act="plan">Réessayer</button>`; return; }
+    if (s.report) {
+      body.innerHTML = s.report.busy ? loading(s.report.busy) : `<div class="good">✓ ${s.report.ok} / ${s.report.total} opération(s) appliquée(s). Tu as maintenant ${s.report.status.count.toLocaleString('fr-FR')} filtres.</div>
+        ${s.report.errors.length ? `<div class="err">${s.report.errors.map(esc).join('\n')}</div>` : ''}`;
+      if (!s.report.busy) setFooter(`<button class="btn filled" data-act="plan">Continuer la simplification</button>`);
+      return;
+    }
+    if (!s.plan) { body.innerHTML = loading(); return; }
+    const p = s.plan;
+    const dupN = p.duplicates.reduce((n, d) => n + d.remove.length, 0);
+    const mergeN = p.merges.reduce((n, m) => n + m.rules.length - 1, 0);
+    let html = `<div class="card soft"><div class="row"><span class="score">${p.total.toLocaleString('fr-FR')}</span><span class="grow">filtres aujourd’hui</span></div>
+      <div class="small muted" style="margin-top:6px">${plural(dupN, 'doublon')} · ${plural(p.overlaps.length, 'recoupement')} à arbitrer · jusqu’à ${mergeN} filtres en moins par fusion.
+      Avant toute modification, une sauvegarde XML de tous tes filtres est téléchargée (réimportable dans Gmail → Paramètres → Filtres → Importer).</div></div>`;
+    if (p.job) html += `<div class="note">Une simplification a été interrompue : ${p.job.next} / ${p.job.ops.length} faites. <button class="btn small" data-act="resume">Reprendre</button></div>`;
+
+    html += `<h2>Doublons</h2><div class="desc">mêmes critères, mêmes actions — on garde le plus ancien</div>`;
+    html += p.duplicates.length ? p.duplicates.map((d, i) => `<label class="card row" style="cursor:pointer"><input type="checkbox" data-act="dup" data-i="${i}" ${s.dupOff.has(i) ? '' : 'checked'}>
+        <code class="crit grow">${esc(d.keep.description)}</code><span class="chip">×${d.remove.length + 1}</span></label>`).join('')
+      + `<div class="row"><span class="grow"></span><button class="btn filled small" data-act="apply-dup">Supprimer les doublons cochés</button></div>`
+      : `<div class="muted small">Aucun doublon.</div>`;
+
+    html += `<h2>Recoupements</h2><div class="desc">un filtre court attrape déjà ce qu’attrapent des filtres plus précis</div>`;
+    if (p.overlaps.length) {
+      html += `<div class="row" style="margin-bottom:10px"><span class="muted small grow">Teste chaque filtre court sur tes vrais mails pour savoir lequel garder.</span><button class="btn small" data-act="test-all">Tout tester</button></div>`;
+      html += p.overlaps.map(o => {
+        const t = s.tests[o.broad.id];
+        const tested = t && !t.loading && !t.error;
+        const reco = tested ? (t.count ? 'narrow' : 'broad') : '';
+        const ch = s.choice[o.broad.id] || 'none';
+        return `<div class="card">
+          <div class="row"><code class="crit">${esc(o.broad.description)}</code><span class="small muted">couvre</span></div>
+          <div class="terms">${o.narrows.map(n => `<code class="crit">${esc(n.description)}</code>`).join('')}</div>
+          <div class="row small muted" style="margin-top:6px">${o.broad.actions.map(a => `<span class="chip">${esc(a)}</span>`).join('')}</div>
+          <div style="margin-top:8px">${testBox(o)}</div>
+          <div style="margin-top:8px">
+            <label class="choice ${reco === 'broad' ? 'reco' : ''}"><input type="radio" name="ov-${esc(o.broad.id)}" data-act="choice" data-id="${esc(o.broad.id)}" value="broad" ${ch === 'broad' ? 'checked' : ''}>
+              <span>Garder « ${esc(o.broad.description)} », supprimer ${plural(o.narrows.length, 'filtre')} plus précis${reco === 'broad' ? ' <b>(conseillé)</b>' : ''}</span></label>
+            <label class="choice ${reco === 'narrow' ? 'reco' : ''}"><input type="radio" name="ov-${esc(o.broad.id)}" data-act="choice" data-id="${esc(o.broad.id)}" value="narrow" ${ch === 'narrow' ? 'checked' : ''}>
+              <span>Trop large : supprimer « ${esc(o.broad.description)} », garder les phrases précises${reco === 'narrow' ? ' <b>(conseillé)</b>' : ''}</span></label>
+            <label class="choice"><input type="radio" name="ov-${esc(o.broad.id)}" data-act="choice" data-id="${esc(o.broad.id)}" value="none" ${ch === 'none' ? 'checked' : ''}><span>Ne rien changer</span></label>
+          </div></div>`;
+      }).join('');
+      html += `<div class="row"><span class="grow"></span><button class="btn filled small" data-act="apply-overlaps">Appliquer mes choix</button></div>`;
+    } else html += `<div class="muted small">Aucun recoupement.</div>`;
+
+    html += `<h2>Fusions</h2><div class="desc">filtres simples aux mêmes actions → un seul filtre « a OR b OR … »</div>`;
+    if (p.merges.length) {
+      html += p.merges.map((m, i) => `<div class="card ${s.mergeOn.has(i) ? '' : 'off'}">
+          <label class="row" style="cursor:pointer"><input type="checkbox" data-act="merge" data-i="${i}" ${s.mergeOn.has(i) ? 'checked' : ''}>
+            <b>${m.rules.length} filtres → 1</b><span class="grow"></span>${m.actions.map(a => `<span class="chip ${/^🏷️/.test(a) ? 'label' : ''}">${esc(a)}</span>`).join('')}</label>
+          <details><summary>Voir le filtre fusionné</summary><div class="crit mono small" style="margin-top:8px">${esc(m.criteria.from ? 'from: ' + m.criteria.from : m.criteria.query)}</div></details>
+        </div>`).join('');
+      html += `<div class="row"><button class="btn small text" data-act="merge-all">Tout cocher</button><span class="grow"></span><button class="btn filled small" data-act="apply-merges">Fusionner les filtres cochés</button></div>`;
+    } else html += `<div class="muted small">Rien à fusionner.</div>`;
+    body.innerHTML = html;
+  }
+
+  function download(name, text) {
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/xml' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+
+  async function applyOps(ops, resume) {
+    if (!resume && !ops.length) return;
+    S.simp.report = { busy: 'Sauvegarde de tes filtres…' };
+    render();
+    try {
+      if (!S.simp.backupDone) {
+        const b = await call('filters:backup');
+        download(`mailFilters_${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')}.xml`, b.xml);
+        S.simp.backupDone = true;
+      }
+      S.simp.report = await call('simplify:apply', resume ? { resume: true } : { ops }, t => { S.simp.report.busy = t; if (S.tab === 'simp') render(); });
+      S.status = S.simp.report.status;
+    } catch (e) { S.simp.report = null; S.simp.error = e.message; }
+    if (S.tab === 'simp') render();
+  }
+
+  async function testRule(id) {
+    S.simp.tests[id] = { loading: true };
+    if (S.tab === 'simp') render();
+    try { S.simp.tests[id] = await call('simplify:testRule', { id }); }
+    catch (e) { S.simp.tests[id] = { error: e.message }; }
+    const t = S.simp.tests[id];
+    if (!t.error && !S.simp.choice[id]) S.simp.choice[id] = t.count ? 'narrow' : 'broad';
+    if (S.tab === 'simp') render();
+  }
+
+  /* ═════════════ onglet « Tendances » ═════════════ */
+
+  async function loadStats() {
+    S.stats = { ...S.stats, loading: true, progress: 'Liste des spams…', error: '', data: null, claude: null };
+    render();
+    try { S.stats.data = await call('stats:run', { months: S.stats.months }, t => { S.stats.progress = t; if (S.tab === 'stats') render(); }); }
+    catch (e) { S.stats.error = e.message; }
+    S.stats.loading = false;
+    if (S.tab === 'stats') render();
+  }
+
+  const pct = x => Math.round(x * 100) + ' %';
+  const shortDate = t => new Date(t).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+
+  // Barres hebdomadaires (une seule série : pas de légende), pics annotés, infobulle au survol.
+  function weeklyChart(d) {
+    const W = 640, H = 170, top = 22, base = H - 22, n = d.weeks.length;
+    const max = Math.max(4, ...d.weeks.map(w => w.count));
+    const step = W / n, bw = Math.max(2, step - 2);
+    const peakWeeks = new Map(d.peaks.map(p => [p.week, p]));
+    let bars = '', hits = '', labels = '', months = '';
+    d.weeks.forEach((w, i) => {
+      const x = i * step + (step - bw) / 2;
+      const h = w.count ? Math.max(2, (w.count / max) * (base - top)) : 0;
+      if (h) {
+        const r = Math.min(4, bw / 2, h), y = base - h;
+        bars += `<path d="M${x},${base}V${y + r}Q${x},${y} ${x + r},${y}H${x + bw - r}Q${x + bw},${y} ${x + bw},${y + r}V${base}Z" fill="#0b57d0"/>`;
+      }
+      const p = peakWeeks.get(w.week);
+      if (p) labels += `<text x="${x + bw / 2}" y="${base - h - 6}" text-anchor="middle" font-size="11" fill="#1f1f1f">${p.count}</text>`;
+      const tip = `Semaine du ${shortDate(w.week)} : ${plural(w.count, 'spam')}${p ? ` — pic : ${pct(p.domainShare)} venaient de ${p.domain}` : ''}`;
+      hits += `<rect class="hit" x="${i * step}" y="0" width="${step}" height="${H}" fill="transparent" data-tip="${esc(tip)}"/>`;
+      const dt = new Date(w.week);
+      if (dt.getDate() <= 7 && i < n - 2) months += `<text x="${x}" y="${H - 6}" font-size="10" fill="#5e5e5e">${dt.toLocaleDateString('fr-FR', { month: 'short' })}</text>`;
+    });
+    return `<div class="chart" style="position:relative">
+      <svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Spams par semaine">
+        <line x1="0" x2="${W}" y1="${base}" y2="${base}" stroke="#c4c7c5"/>
+        <line x1="0" x2="${W}" y1="${top}" y2="${top}" stroke="#eceff1" stroke-dasharray="3 3"/>
+        <text x="${W}" y="${top - 6}" text-anchor="end" font-size="10" fill="#5e5e5e">${max} / semaine</text>
+        ${bars}${labels}${months}${hits}
+      </svg><div class="tip" hidden></div></div>`;
+  }
+
+  function barList(title, items, opts = {}) {
+    if (!items.length) return '';
+    return `<div class="card"><div style="font-weight:500;margin-bottom:8px">${title}</div>
+      ${items.map(it => `<div style="margin:6px 0">
+        <div class="row small" style="flex-wrap:nowrap"><span class="grow mono" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(it.value)}">${opts.link ? `<a href="${esc(searchUrl(opts.link(it.value)))}" target="_blank" rel="noopener">${esc(it.value)}</a>` : esc(it.value)}</span>
+          <span class="muted">${it.count} · ${pct(it.share)}</span></div>
+        <div class="gauge" style="margin:3px 0 0;height:6px"><i style="width:${Math.max(2, it.share * 100)}%;background:#0b57d0"></i></div></div>`).join('')}
+      ${opts.note || ''}</div>`;
+  }
+
+  function renderStats() {
+    const st = S.stats;
+    const head = `<div class="row" style="margin-bottom:12px"><span class="small muted">Spams du dossier Spam et du libellé des filtres, sur</span>
+      <select data-bind="stats.months">${[3, 6, 12, 24].map(m => `<option value="${m}" ${st.months === m ? 'selected' : ''}>${m} mois</option>`).join('')}</select>
+      <button class="btn small" data-act="stats-run">${st.data ? 'Actualiser' : 'Analyser'}</button></div>`;
+    if (st.loading) { body.innerHTML = head + loading(st.progress); return; }
+    if (st.error) { body.innerHTML = head + `<div class="err">${esc(st.error)}</div>`; return; }
+    if (!st.data) { body.innerHTML = head; return; }
+    const d = st.data;
+    if (!d.total) { body.innerHTML = head + `<div class="empty"><div class="big">🌤</div>Aucun spam sur la période.</div>`; return; }
+    const ch = d.change4;
+    // « hausse » / « baisse » seulement si l'écart dépasse le bruit (±10 % et au moins 5 spams)
+    const dir = ch === null || Math.abs(d.last4 - d.prev4) < 5 ? 0 : ch <= -0.1 ? -1 : ch >= 0.1 ? 1 : 0;
+    const trend = ch === null ? '' : `<span class="chip ${dir < 0 ? 'ok' : dir > 0 ? 'warn' : ''}">${dir < 0 ? '▼ en baisse' : dir > 0 ? '▲ en hausse' : '■ stable'} · ${d.prev4} → ${d.last4} sur 4 semaines</span>`;
+    const variants = d.lists.to.filter(t => t.value !== d.me.toLowerCase() && !t.value.startsWith('('));
+    let html = head + `<div class="card soft"><div class="row"><span class="score">${d.total.toLocaleString('fr-FR')}</span><span class="grow">spams en ${d.months} mois · ${d.last4} ces 4 dernières semaines</span>${trend}</div>
+      <div class="small muted" style="margin-top:6px">Tendance de fond : ${d.monthlyTrend > 0 ? '+' : ''}${pct(d.monthlyTrend)} par mois${d.peaks.length ? ` · ${plural(d.peaks.length, 'vague')} repérée${d.peaks.length > 1 ? 's' : ''}` : ' · pas de vague marquée'}${d.capped ? ' · limité aux 3 000 plus récents' : ''}</div></div>`;
+    html += `<h2>Spams par semaine</h2>${weeklyChart(d)}`;
+    if (d.peaks.length) html += `<div class="card">${d.peaks.map(p => `<div class="finding"><span class="pts">🌊</span><span><b>Semaine du ${shortDate(p.week)} : ${plural(p.count, 'spam')}</b> — ${pct(p.domainShare)} venaient de <a href="${esc(searchUrl('from:(' + p.domain + ')'))}" target="_blank" rel="noopener">${esc(p.domain)}</a></span></div>`).join('')}</div>`;
+
+    html += `<h2>Points communs</h2>`;
+    const commonText = c => c.field === 'words' ? esc(c.label.replace('%s', c.value))
+      : c.field === 'tld' ? `expédiés depuis un domaine en <b class="mono">.${esc(c.value)}</b>`
+      : `${esc(c.label)}${c.value ? ` <b class="mono">${esc(c.value)}</b>` : ''}`;
+    html += d.commons.length ? `<div class="card">${d.commons.map(c => `<div class="finding"><span class="pts">${pct(c.share)}</span><span>${commonText(c)}</span></div>`).join('')}</div>`
+      : `<div class="muted small">Rien ne revient dans plus d’un quart des spams : ils viennent d’horizons variés.</div>`;
+    if (variants.length) html += `<div class="note">📮 Une partie des spams vise ton adresse écrite autrement (${variants.map(v => `<b class="mono">${esc(v.value)}</b>`).join(', ')}). Gmail ignore les points et le « + », mais pas les fichiers qui ont fuité : cette écriture désigne la liste d’origine.</div>`;
+
+    html += `<h2>En clair</h2>`;
+    if (!d.claude) html += `<div class="muted small">Ajoute ta clé API Anthropic dans les <a href="#" data-act="options">options</a> pour que Claude interprète ces chiffres.</div>`;
+    else if (!st.claude) html += `<button class="btn tonal" data-act="stats-claude">✦ Trouver le point commun avec Claude</button> <span class="small muted">envoie seulement les statistiques, pas tes mails</span>`;
+    else if (st.claude.loading) html += `<div class="claude muted">Claude réfléchit…</div>`;
+    else if (st.claude.error) html += `<div class="err">${esc(st.claude.error)}</div>`;
+    else html += `<div class="claude">${esc(st.claude.text)}</div>`;
+
+    html += `<h2>Détail</h2><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px">
+      ${barList('Adresse visée', d.lists.to)}
+      ${barList('Domaines d’expédition', d.lists.fromDomain, { link: v => `from:(${v})` })}
+      ${barList('Serveurs d’envoi (IP /24)', d.lists.ip24)}
+      ${barList('Plateformes d’envoi (adresse de retour)', d.lists.rp)}
+      ${barList('Extensions de domaine', d.lists.tld.map(x => ({ ...x, value: '.' + x.value })))}
+      ${barList('Mots des objets', d.lists.words, { link: v => `subject:(${v}) in:spam` })}
+    </div>`;
+    body.innerHTML = html;
+  }
+
+  // Infobulle du graphique
+  root.addEventListener('mousemove', e => {
+    const hit = e.target.closest && e.target.closest('rect.hit');
+    const chart = e.target.closest && e.target.closest('.chart');
+    const tip = chart && chart.querySelector('.tip');
+    root.querySelectorAll('.chart .tip').forEach(t => { if (t !== tip) t.hidden = true; });
+    if (!tip) return;
+    if (!hit) { tip.hidden = true; return; }
+    const box = chart.getBoundingClientRect();
+    tip.textContent = hit.dataset.tip;
+    tip.hidden = false;
+    tip.style.left = Math.min(box.width - 220, Math.max(0, e.clientX - box.left - 110)) + 'px';
+    tip.style.top = Math.max(0, e.clientY - box.top - 54) + 'px';
+  });
+
+  /* ───────── statut / actions générales ───────── */
+
+  async function refreshStatus(reload, replace) {
+    S.statusError = '';
+    try { S.status = await call(reload ? 'filters:reload' : 'filters:status', { replace }); }
+    catch (e) { S.statusError = e.message; }
+    renderStatus();
+  }
+
+  function open(tab) {
+    drawer.classList.add('open');
+    S.tab = tab || (currentThread() ? 'mail' : inSpamFolder() ? 'spam' : S.tab);
+    if (!S.status) refreshStatus();
+    show(S.tab);
+  }
+
+  function show(tab) {
+    S.tab = tab;
+    render();
+    if (tab === 'mail') loadMail();
+    if (tab === 'spam' && !S.spam.data && !S.spam.loading && !S.spam.error) loadSpam();
+    if (tab === 'simp' && !S.simp.plan && !S.simp.loading && !S.simp.error) loadPlan();
+    if (tab === 'stats' && !S.stats.data && !S.stats.loading && !S.stats.error) loadStats();
+  }
+
+  const close = () => drawer.classList.remove('open');
+
+  function setPath(obj, path, value) {
+    const keys = path.split('.');
+    const last = keys.pop();
+    keys.reduce((o, k) => o[k], obj)[last] = value;
+  }
+
+  root.addEventListener('click', async e => {
+    const tabBtn = e.target.closest('[data-tab]');
+    if (tabBtn) { show(tabBtn.dataset.tab); return; }
+    const el = e.target.closest('[data-act]');
+    if (!el) return;
+    const act = el.dataset.act, d = S.mail.data;
+    if (el.tagName === 'A' && el.getAttribute('href') === '#') e.preventDefault();
+    switch (act) {
+      case 'toggle': drawer.classList.contains('open') ? close() : open(); break;
+      case 'close': close(); break;
+      case 'reload': await refreshStatus(true); if (S.tab === 'mail') loadMail(true); else if (S.tab === 'simp') loadPlan(); break;
+      case 'replace': await refreshStatus(true, true); break;
+      case 'options': chrome.runtime.sendMessage({ cmd: 'options' }).catch(() => {}); break;
+      case 'mail-retry': loadMail(true); break;
+      case 'del': S.mail.confirm = el.dataset.id; render(); break;
+      case 'del-cancel': S.mail.confirm = ''; render(); break;
+      case 'del-ok':
+        try { await call('filter:delete', { id: el.dataset.id }); S.mail.confirm = ''; loadMail(true); }
+        catch (err) { S.mail.error = err.message; render(); }
+        break;
+      case 'explain': {
+        const label = el.dataset.label;
+        S.mail.explain[label] = { loading: true }; render();
+        try { S.mail.explain[label] = { data: await call('mail:explainLabel', { threadId: d.mail.threadId, label }) }; }
+        catch (err) { S.mail.explain[label] = { error: err.message }; }
+        if (S.tab === 'mail') render();
+        break;
+      }
+      case 'claude':
+        S.mail.claude = { loading: true }; render();
+        try { S.mail.claude = await call('mail:claude', { threadId: d.mail.threadId }); }
+        catch (err) { S.mail.claude = { error: err.message }; }
+        if (S.tab === 'mail') render();
+        break;
+      case 'create-open': {
+        const sel = String(window.getSelection() || '').trim().replace(/\s+/g, ' ');
+        const dom = (nameOf(d.mail.from).email.split('@')[1] || '');
+        S.mail.create = { field: sel ? 'query' : 'from', value: sel || (dom ? '@' + dom : ''), target: d.defaultLabel, defaultLabel: d.defaultLabel, archive: true, markRead: false };
+        render();
+        break;
+      }
+      case 'create-close': S.mail.create = null; render(); break;
+      case 'create-test':
+      case 'create-go': {
+        const c = S.mail.create;
+        c.error = ''; c.test = null; c.done = '';
+        c.busy = act === 'create-test' ? 'Recherche dans Gmail…' : 'Création…'; render();
+        try {
+          if (act === 'create-test') c.test = await call('filter:test', c);
+          else { const r = await call('filter:create', c); c.done = r.rule.description; S.status = r.status; loadMail(true); }
+        } catch (err) { c.error = err.message; }
+        c.busy = '';
+        if (S.tab === 'mail' && S.mail.create) render();
+        break;
+      }
+      case 'spam-run': loadSpam(); break;
+      case 'spam-apply': applySpam(); break;
+      case 'sel': S.spam.sel = el.dataset.id; render(); break;
+      case 'images': S.spam.images = el.checked; fillPreview(); break;
+      case 'pick': el.checked ? S.spam.off.delete(el.dataset.pid) : S.spam.off.add(el.dataset.pid); render(); break;
+      case 'plan': loadPlan(); break;
+      case 'stats-run': loadStats(); break;
+      case 'stats-claude':
+        S.stats.claude = { loading: true }; render();
+        try { S.stats.claude = await call('stats:claude'); }
+        catch (err) { S.stats.claude = { error: err.message }; }
+        if (S.tab === 'stats') render();
+        break;
+      case 'resume': applyOps([], true); break;
+      case 'dup': { const i = +el.dataset.i; el.checked ? S.simp.dupOff.delete(i) : S.simp.dupOff.add(i); break; }
+      case 'merge': { const i = +el.dataset.i; el.checked ? S.simp.mergeOn.add(i) : S.simp.mergeOn.delete(i); render(); break; }
+      case 'merge-all': S.simp.plan.merges.forEach((_, i) => S.simp.mergeOn.add(i)); render(); break;
+      case 'choice': S.simp.choice[el.dataset.id] = el.value; break;
+      case 'test-rule': testRule(el.dataset.id); break;
+      case 'test-all': {
+        const ids = S.simp.plan.overlaps.map(o => o.broad.id).filter(id => !S.simp.tests[id]);
+        for (let i = 0; i < ids.length; i += 2) await Promise.all(ids.slice(i, i + 2).map(testRule));
+        break;
+      }
+      case 'apply-dup':
+        applyOps(S.simp.plan.duplicates.filter((_, i) => !S.simp.dupOff.has(i)).flatMap(g => g.remove.map(r => ({ type: 'delete', id: r.id }))));
+        break;
+      case 'apply-overlaps':
+        applyOps(S.simp.plan.overlaps.flatMap(o => {
+          const ch = S.simp.choice[o.broad.id];
+          return ch === 'broad' ? o.narrows.map(n => ({ type: 'delete', id: n.id })) : ch === 'narrow' ? [{ type: 'delete', id: o.broad.id }] : [];
+        }));
+        break;
+      case 'apply-merges':
+        applyOps(S.simp.plan.merges.filter((_, i) => S.simp.mergeOn.has(i)).map(m => ({ type: 'merge', criteria: m.criteria, action: m.action, ids: m.rules.map(r => r.id) })));
+        break;
+    }
+  });
+
+  // Champs : on met l'état à jour sans tout redessiner (sinon le curseur saute).
+  root.addEventListener('input', e => {
+    const t = e.target;
+    if (t.dataset.edit) S.spam.edits[t.dataset.edit] = t.value;
+    if (t.dataset.bind) {
+      const v = t.type === 'checkbox' ? t.checked : t.value;
+      if (t.dataset.bind.startsWith('create.')) setPath(S.mail, t.dataset.bind, v);
+      else if (t.dataset.bind.startsWith('opts.')) setPath(S.spam, t.dataset.bind, v);
+      else if (t.dataset.bind === 'stats.months') S.stats.months = Number(v);
+    }
+  });
+  root.addEventListener('change', e => { if (e.target.dataset.bind === 'create.field' || e.target.dataset.bind === 'create.target') render(); });
+
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && drawer.classList.contains('open')) close(); });
+  chrome.runtime.onMessage.addListener(m => { if (m.cmd === 'open') open(); });
+
+  // Navigation dans Gmail : on suit le mail affiché (Gmail dessine le fil un peu après le changement d'adresse).
+  window.addEventListener('hashchange', () => {
+    if (!drawer.classList.contains('open') || S.tab !== 'mail') return;
+    [300, 900, 2000].forEach(ms => setTimeout(() => loadMail(), ms));
+  });
 })();

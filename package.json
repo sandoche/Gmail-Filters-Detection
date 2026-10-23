@@ -2,5 +2,5 @@
   "name": "gmail-filters-detection",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node tests/analyzer.test.mjs && node tests/integration.test.mjs" }
+  "scripts": { "test": "node tests/analyzer.test.mjs && node tests/gfm.test.mjs && node tests/integration.test.mjs" }
 }

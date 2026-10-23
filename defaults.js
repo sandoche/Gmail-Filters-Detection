@@ -5,6 +5,7 @@ export const DEFAULTS = {
   applyExisting: false,   // « appliquer aussi aux conversations correspondantes » : décoché par défaut
   trashAfter: true,       // mettre les spams traités à la corbeille une fois le filtre créé
   claudeMode: 'fallback', // 'off' | 'fallback' (Claude seulement si les règles locales échouent)
-  model: 'claude-sonnet-4-5',
-  maxSpams: 100
+  model: 'claude-sonnet-5-5',
+  maxSpams: 100,
+  blockTrackers: true     // neutraliser les pixels de suivi dans les mails affichés (tracking.js)
 };
