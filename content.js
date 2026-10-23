@@ -249,14 +249,15 @@
 
   function dangerBlock(d, full) {
     const findings = full ? d.findings : d.findings.slice(0, 3);
+    const pts = f => f.points ? '+' + f.points : 'ℹ';
     return `<div class="card">
       <div class="row" style="flex-wrap:nowrap"><span class="score" style="color:${d.color}">${d.score}<span class="small muted">/100</span></span>
         <b style="color:${d.color}">${esc(d.verdict)}</b></div>
       <div class="gauge"><i style="width:${d.score}%;background:${d.color}"></i></div>
       ${d.auth && (d.auth.spf || d.auth.dmarc) ? `<div style="margin-bottom:6px"><span class="chip ${d.auth.dmarc === 'fail' ? 'bad' : d.auth.dmarc === 'pass' ? 'ok' : ''}" title="Authentification de l’expéditeur">SPF ${esc(d.auth.spf || '?')} · DKIM ${esc(d.auth.dkim || '?')} · DMARC ${esc(d.auth.dmarc || '?')}</span></div>` : ''}
-      ${findings.length ? findings.map(f => `<div class="finding"><span class="pts">+${f.points}</span><span>${f.icon} <b>${esc(f.title)}</b>${f.detail ? `<br><span class="muted small">${esc(f.detail)}</span>` : ''}</span></div>`).join('')
+      ${findings.length ? findings.map(f => `<div class="finding"><span class="pts">${pts(f)}</span><span>${f.icon} <b>${esc(f.title)}</b>${f.detail ? `<br><span class="muted small">${esc(f.detail)}</span>` : ''}</span></div>`).join('')
         : '<div class="muted small">Pas de texte caché, pas de mots découpés, expéditeur cohérent.</div>'}
-      ${!full && d.findings.length > 3 ? `<details><summary>Voir les ${d.findings.length} indices</summary>${d.findings.slice(3).map(f => `<div class="finding"><span class="pts">+${f.points}</span><span>${f.icon} <b>${esc(f.title)}</b>${f.detail ? `<br><span class="muted small">${esc(f.detail)}</span>` : ''}</span></div>`).join('')}</details>` : ''}
+      ${!full && d.findings.length > 3 ? `<details><summary>Voir les ${d.findings.length} indices</summary>${d.findings.slice(3).map(f => `<div class="finding"><span class="pts">${pts(f)}</span><span>${f.icon} <b>${esc(f.title)}</b>${f.detail ? `<br><span class="muted small">${esc(f.detail)}</span>` : ''}</span></div>`).join('')}</details>` : ''}
     </div>`;
   }
 
@@ -309,7 +310,7 @@
         <select data-bind="create.field">
           ${[['query', 'Phrase dans le mail'], ['subject', 'Phrase dans l’objet'], ['from', 'Expéditeur']].map(([v, t]) => `<option value="${v}" ${c.field === v ? 'selected' : ''}>${t}</option>`).join('')}
         </select>
-        <input type="text" class="grow" data-bind="create.value" value="${esc(c.value)}" placeholder="ex. colis est bloqué au dépôt">
+        <input type="text" class="grow" data-bind="create.value" value="${esc(c.value)}" placeholder="sélectionne une phrase dans le mail, ou tape-la">
       </div>
       <div class="row" style="margin-bottom:8px">
         <span class="small muted">Action</span>
@@ -495,7 +496,7 @@
     if (d.proposals.length) list += `<h2>Filtres proposés <span class="count">${d.proposals.length} · 0 mail légitime chacun</span></h2>`;
     for (const p of d.proposals) {
       const off = sp.off.has(p.pid);
-      const kind = p.cand.kind === 'fromname' ? 'Nom affiché' : p.cand.type === 'from' ? 'Expéditeur' : p.cand.type === 'subject' ? 'Objet' : 'Texte du mail';
+      const kind = p.cand.type === 'subject' ? 'Objet' : 'Texte du mail';
       list += `<div class="card ${off ? 'off' : ''}">
         <div class="row"><input type="checkbox" data-act="pick" data-pid="${p.pid}" ${off ? '' : 'checked'} title="Créer ce filtre">
           <span class="chip blue">${kind}</span>${p.cand.byClaude ? '<span class="chip warn">✦ Claude</span>' : ''}<span class="grow"></span>
@@ -748,7 +749,10 @@
       : `${esc(c.label)}${c.value ? ` <b class="mono">${esc(c.value)}</b>` : ''}`;
     html += d.commons.length ? `<div class="card">${d.commons.map(c => `<div class="finding"><span class="pts">${pct(c.share)}</span><span>${commonText(c)}</span></div>`).join('')}</div>`
       : `<div class="muted small">Rien ne revient dans plus d’un quart des spams : ils viennent d’horizons variés.</div>`;
-    if (variants.length) html += `<div class="note">📮 Une partie des spams vise ton adresse écrite autrement (${variants.map(v => `<b class="mono">${esc(v.value)}</b>`).join(', ')}). Gmail ignore les points et le « + », mais pas les fichiers qui ont fuité : cette écriture désigne la liste d’origine.</div>`;
+    const isGmail = v => /@(gmail|googlemail)\.com$/.test(v.value);
+    const spelled = variants.filter(isGmail), aliases = variants.filter(v => !isGmail(v));
+    if (spelled.length) html += `<div class="note">📮 Une partie des spams vise ton adresse écrite autrement (${spelled.map(v => `<b class="mono">${esc(v.value)}</b>`).join(', ')}). Gmail ignore les points et le « + », mais pas les fichiers qui ont fuité : cette écriture désigne la liste d’origine.</div>`;
+    if (aliases.length) html += `<div class="note">🔀 Des spams arrivent par des alias (${aliases.map(v => `<b class="mono">${esc(v.value)}</b> ×${v.count}`).join(', ')}). Un alias Relay / « Masquer mon adresse » n’a été donné qu’à un seul site : c’est ce site qui a fuité (ou revendu) l’adresse. Tu peux désactiver l’alias dans ton service de relais.</div>`;
 
     html += `<h2>En clair</h2>`;
     if (!d.claude) html += `<div class="muted small">Ajoute ta clé API Anthropic dans les <a href="#" data-act="options">options</a> pour que Claude interprète ces chiffres.</div>`;
@@ -851,9 +855,9 @@
         if (S.tab === 'mail') render();
         break;
       case 'create-open': {
+        // des mots plutôt que l'expéditeur : la phrase sélectionnée dans le mail, sinon à saisir
         const sel = String(window.getSelection() || '').trim().replace(/\s+/g, ' ');
-        const dom = (nameOf(d.mail.from).email.split('@')[1] || '');
-        S.mail.create = { field: sel ? 'query' : 'from', value: sel || (dom ? '@' + dom : ''), target: d.defaultLabel, defaultLabel: d.defaultLabel, archive: true, markRead: false };
+        S.mail.create = { field: 'query', value: sel, target: d.defaultLabel, defaultLabel: d.defaultLabel, archive: true, markRead: false };
         render();
         break;
       }

@@ -32,7 +32,7 @@ Ouvre un mail, clique sur **Filtres** (en bas à droite) :
 
 ![Dangerosité et pistage](docs/screenshots/pistage.jpg)
 
-- **Dangerosité** : score 0–100 et liste des ruses détectées (texte caché, mots découpés lettre par lettre, caractères Unicode sosies, liens dont le texte affiche un site et qui vont ailleurs, nom d'affichage qui imite une marque, SPF/DKIM/DMARC en échec…).
+- **Dangerosité** : score 0–100 et liste des ruses détectées (texte caché absent du texte visible, mots découpés lettre par lettre, caractères Unicode sosies, liens dont le texte affiche un site et qui vont ailleurs, nom d'affichage qui imite une marque, SPF/DKIM/DMARC en échec…). Les mails transférés par un service d'alias (Firefox Relay, Apple « Masquer mon adresse », DuckDuckGo, SimpleLogin, addy.io, Proton Pass) sont jugés sur leur expéditeur d'origine, et les liens de suivi des plateformes d'envoi ne comptent pas comme pièges.
 - **Pistage** : pixels de suivi bloqués (service, raison), et liens qui passent par un compteur de clics.
 
 ### Dossier Spam : danger + filtres automatiques
@@ -40,7 +40,7 @@ Ouvre un mail, clique sur **Filtres** (en bas à droite) :
 ![Onglet « Spams »](docs/screenshots/spams.jpg)
 
 - chaque spam avec sa **note de danger**, et son **aperçu** à droite (scripts, liens et images distantes désactivés ; les images peuvent être affichées sur demande, les pixels de suivi restent retirés) ;
-- des **filtres proposés**, chacun testé dans ta vraie boîte pour attraper ce spam et **0 mail légitime** : domaine d'expéditeur stable, phrase exacte de l'objet ou du corps, nom affiché. Si rien de sûr n'est trouvé, Claude peut en proposer (facultatif) ;
+- des **filtres proposés**, chacun testé dans ta vraie boîte pour attraper ce spam et **0 mail légitime** : uniquement des **mots** (phrase exacte de l'objet ou du corps), jamais l'expéditeur — les spammeurs changent d'adresse à chaque envoi, pas de texte. Si rien de sûr n'est trouvé, Claude peut en proposer (facultatif) ;
 - tu coches, tu modifies, tu valides : filtres créés (libellé `###CACA###` + archivage par défaut), spams traités mis à la corbeille (récupérables 30 jours).
 
 ### Simplifier mes filtres
@@ -58,7 +58,7 @@ Ouvre un mail, clique sur **Filtres** (en bas à droite) :
 
 - spams par semaine (dossier Spam + libellé des filtres), tendance, **vagues** et le domaine qui les explique ;
 - **points communs** : ce qui revient dans au moins un quart des spams ;
-- **adresse visée** : Gmail ignore les points et le « + » (pour `jeandupont@gmail.com`, les adresses `jean.dupont@gmail.com` et `jeandupont+shop@gmail.com` arrivent dans la même boîte), mais pas les bases de données qui ont fuité — **une écriture différente désigne la liste d'origine** ;
+- **adresse visée** : Gmail ignore les points et le « + » (pour `jeandupont@gmail.com`, les adresses `jean.dupont@gmail.com` et `jeandupont+shop@gmail.com` arrivent dans la même boîte), mais pas les bases de données qui ont fuité — **une écriture différente désigne la liste d'origine**. Avec un service d'alias (Firefox Relay…), chaque alias n'a été donné qu'à un site : **l'alias visé désigne le site qui a fuité** ;
 - domaines, serveurs (IP /24), plateformes d'envoi, extensions, mots des objets ;
 - **Trouver le point commun avec Claude** (facultatif) : n'envoie que les statistiques, jamais le contenu des mails.
 

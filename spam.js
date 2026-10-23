@@ -47,11 +47,11 @@ async function claudeCandidates(msgs, s) {
     return { id: m.id, from: sm.from, returnPath: sm.returnPath, subject: sm.subject, text: bodyText(m.payload).slice(0, 1200) };
   });
   const prompt = `Tu aides à créer des filtres Gmail anti-spam. Pour chaque spam ci-dessous, propose jusqu'à 4 critères Gmail
-les plus précis possible, qui attrapent ce spam (et ses variantes) mais aucun vrai mail.
+les plus précis possible, qui attrapent ce spam (et ses variantes) mais aucun vrai mail. Uniquement des mots, jamais
+l'expéditeur (les spammeurs changent d'adresse et de domaine à chaque envoi, pas de texte).
 Types autorisés :
 - "subject" : phrase exacte présente telle quelle dans l'objet (sans le nom/adresse du destinataire, sans chiffres variables) ;
-- "query"   : phrase exacte présente telle quelle dans le texte visible du mail ;
-- "from"    : domaine d'expéditeur stable sous la forme "@domaine.tld" (jamais un domaine aléatoire ni un webmail).
+- "query"   : phrase exacte présente telle quelle dans le texte visible du mail.
 Évite les homoglyphes (ɑ, і…), les identifiants, les montants. Réponds UNIQUEMENT en JSON :
 {"results":[{"id":"...","candidates":[{"type":"subject","value":"..."}]}]}
 
@@ -62,7 +62,7 @@ ${JSON.stringify(items, null, 1)}`;
   const out = [];
   for (const r of json.results || []) {
     for (const c of r.candidates || []) {
-      if (!['subject', 'query', 'from'].includes(c.type) || !c.value) continue;
+      if (!['subject', 'query'].includes(c.type) || !c.value) continue;
       const value = String(c.value).replace(/^"|"$/g, '').trim();
       if (value.length < 4) continue;
       out.push({ type: c.type, value, label: 'Proposé par Claude', byClaude: true });

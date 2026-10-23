@@ -87,7 +87,8 @@ await test('dossier Spam : dangerosité, aperçu et filtres proposés', async ()
   assert.deepEqual(Object.keys(d.mails).sort(), ['d1', 'u1', 'w1', 'w2']);
   assert.ok(d.mails.w1.danger.score > d.mails.d1.danger.score, 'le Walmart avec texte caché est plus dangereux');
   assert.match(d.mails.w1.html, /CLAIM YOUR PRIZE/);
-  assert.deepEqual(d.proposals.map(p => p.query), ['subject:"You have received a payment"', 'from:(@dhl-suivi-colis.com)']);
+  // que des mots, jamais l'expéditeur ; « votre colis est en attente de récupération » est écarté (vrai mail de La Poste)
+  assert.deepEqual(d.proposals.map(p => p.query), ['subject:"You have received a payment"', '"Payez les frais de douane maintenant"']);
   assert.deepEqual(d.uncovered, ['u1']);
   assert.ok(!('anthropicKey' in (d.settings || {})));
   const a = await call('spam:apply', { proposals: d.proposals.map(p => ({ cand: p.cand, edited: false, coverIds: p.coverIds })), options: {} });

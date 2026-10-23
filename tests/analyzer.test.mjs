@@ -6,6 +6,5 @@ const walmart=mk('w1','#Wɑlmɑrt* <info@mGfiZgHn5QPSDJMx2f.com>','soaresden; Yo
 const dhl=mk('d1','DHL <noreply@dhl-suivi-colis.com>','⚠️ Dernier rappel : votre colis est en attente de récupération!','<p>Votre colis n° 4455 est bloqué au centre de tri. Payez les frais de douane.</p>');
 const cloud=mk('c1','Cloud_Storage_Team <x8k2j@qwrtzpxk9.net>','Storage may be filling up – Get more space to avoid losing files','<p>Your cloud storage is almost full</p>');
 for (const m of [walmart,dhl,cloud]) { console.log('---',A.summary(m).subject); for (const c of A.candidatesFor(m,'soaresden@gmail.com')) console.log(' ',c.type,'|',A.q(c),'|',JSON.stringify(A.filterCriteria(c))); }
-console.log('random:', ['mgfizghn5qpsdjmx2f.com','ynnglobal.com','dhl-suivi-colis.com','qwrtzpxk9.net','edf-renouvelables.com','amazon.fr'].map(d=>d+'='+A.domainLooksRandom(d)).join(' '));
 const g=A.greedyCover([{cand:{type:'subject',value:'a b c'},covers:new Set(['1','2'])},{cand:{type:'from',value:'@x.com'},covers:new Set(['2','3'])},{cand:{type:'query',value:'z z z'},covers:new Set(['3'])}],['1','2','3','4']);
 console.log('cover:',g.chosen.map(c=>c.cand.value+':'+[...c.covers]),'uncovered',g.uncovered);

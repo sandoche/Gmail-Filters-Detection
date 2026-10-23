@@ -123,6 +123,22 @@ test('scam : texte caché, lettres découpées, faux expéditeur, DMARC', () => 
   const titles = r.findings.map(f => f.title).join(' | ');
   for (const k of ['texte caché', 'lettre par lettre', 'Lien trompeur', 'adresse IP', 'Paypal', 'DMARC fail']) assert.match(titles, new RegExp(k, 'i'));
 });
+test('scam : newsletter Microsoft transférée par Firefox Relay = pas un scam', () => {
+  const para = 'Cela fait 12 ans que nous sommes aux côtés des Windows Insiders. Découvrez les nouveautés de la version 26H2, les builds Canary et Dev, et les badges anniversaire. ';
+  const relayed = msg('r1', {
+    From: '"Windowsinsiderprogram@e-mails.microsoft.com [via Relay]" <opx7a862u@mozmail.com>', To: 'opx7a862u@mozmail.com',
+    'Reply-To': 'replies@mozmail.com', 'Return-Path': '<bounce@relay.firefox.com>',
+    Subject: 'Cela fait 12 ans que nous sommes aux côtés des Windows Insiders !',
+    'Authentication-Results': 'mx.google.com; spf=pass; dkim=pass; dmarc=pass'
+  }, '<div style="display:none">Nous avons créé quelque chose pour vous.' + '&#847;&zwnj;&nbsp;'.repeat(150) + '</div>' +
+     '<table><tr><td>Courriel transféré par <a href="https://relay.firefox.com/accounts/profile/">mozmail.com</a></td></tr></table>' +
+     '<div class="desktop"><p>' + para.repeat(5) + '</p></div>' +
+     '<div style="display:none;max-height:0">' + para.repeat(5) + '</div>' +
+     '<a href="https://click.e-mails.microsoft.com/?qs=abc123">www.microsoft.com</a> <a href="https://u1234.ct.sendgrid.net/ls/click?upn=x">insider.windows.com</a>');
+  const r = analyzeScam_(relayed);
+  assert.equal(r.level, 'ok', r.findings.map(f => `+${f.points} ${f.title}`).join(' | '));
+  assert.match(r.findings.map(f => f.title).join(' | '), /Transféré par Firefox Relay/);
+});
 test('scam : un mail honnête reste propre', () => {
   const ok = msg('o1', { From: 'La Poste <info@laposte.fr>', To: 'moi@gmail.com', Subject: 'Votre colis',
     'Authentication-Results': 'mx.google.com; spf=pass; dkim=pass; dmarc=pass' },

@@ -32,7 +32,7 @@ Open an email and click **Filtres** (bottom right):
 
 ![Danger and tracking](docs/screenshots/pistage.jpg)
 
-- **Danger**: 0–100 score and the list of tricks found (hidden text, words split letter by letter, look-alike Unicode characters, links whose text shows one site but go elsewhere, display names imitating a brand, failing SPF/DKIM/DMARC…).
+- **Danger**: 0–100 score and the list of tricks found (hidden text missing from the visible text, words split letter by letter, look-alike Unicode characters, links whose text shows one site but go elsewhere, display names imitating a brand, failing SPF/DKIM/DMARC…). Emails forwarded by an alias service (Firefox Relay, Apple Hide My Email, DuckDuckGo, SimpleLogin, addy.io, Proton Pass) are judged on their original sender, and sending platforms' click-tracking links don't count as traps.
 - **Tracking**: blocked tracking pixels (service, reason), and links routed through a click counter.
 
 ### Spam folder: danger + automatic filters
@@ -40,7 +40,7 @@ Open an email and click **Filtres** (bottom right):
 ![“Spams” tab](docs/screenshots/spams.jpg)
 
 - each spam with its **danger score** and a **preview** on the right (scripts, links and remote images disabled; images can be shown on request, tracking pixels stay removed);
-- **proposed filters**, each tested against your real mailbox to catch that spam and **0 legitimate emails**: stable sender domain, exact subject or body phrase, display name. When nothing safe is found, Claude can suggest some (optional);
+- **proposed filters**, each tested against your real mailbox to catch that spam and **0 legitimate emails**: **words only** (exact subject or body phrase), never the sender — spammers change address with every send, not their wording. When nothing safe is found, Claude can suggest some (optional);
 - tick, edit, confirm: filters are created (label `###CACA###` + archive by default), handled spam goes to the trash (recoverable for 30 days).
 
 ### Simplify my filters
@@ -58,7 +58,7 @@ Open an email and click **Filtres** (bottom right):
 
 - spam per week (Spam folder + filter label), trend, **waves** and the domain behind each one;
 - **common points**: anything found in at least a quarter of the spam;
-- **address targeted**: Gmail ignores dots and "+" (for `johndoe@gmail.com`, `john.doe@gmail.com` and `johndoe+shop@gmail.com` land in the same inbox), but leaked databases don't — **a different spelling points to the list it came from**;
+- **address targeted**: Gmail ignores dots and "+" (for `johndoe@gmail.com`, `john.doe@gmail.com` and `johndoe+shop@gmail.com` land in the same inbox), but leaked databases don't — **a different spelling points to the list it came from**. With an alias service (Firefox Relay…), each alias was given to a single site: **the alias targeted points to the site that leaked it**;
 - domains, servers (IP /24), sending platforms, TLDs, subject words;
 - **Find the common point with Claude** (optional): only the statistics are sent, never email content.
 

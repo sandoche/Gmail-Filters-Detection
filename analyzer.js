@@ -1,13 +1,6 @@
 // Moteur d'analyse local : propose des critères de filtre pour un spam.
 // Fonctions pures (testables sous Node).
 
-const FREEMAIL = new Set([
-  'gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.fr', 'hotmail.com', 'hotmail.fr',
-  'outlook.com', 'outlook.fr', 'live.com', 'live.fr', 'msn.com', 'icloud.com', 'me.com',
-  'aol.com', 'orange.fr', 'wanadoo.fr', 'free.fr', 'sfr.fr', 'laposte.net', 'gmx.com',
-  'gmx.fr', 'proton.me', 'protonmail.com', 'yandex.com', 'mail.ru', 'bbox.fr'
-]);
-
 const STOP = new Set(('a an the of to in on at for from by with and or is are be been was were it this that ' +
   'you your yours we our us i me my he she they them his her its as not no yes do does did have has had ' +
   'will can may just now here there all any le la les un une des de du d l à a au aux et ou en dans sur ' +
@@ -33,49 +26,6 @@ export function headerMap(payload) {
     (m[k] = m[k] || []).push(h.value);
   }
   return m;
-}
-
-export function parseAddress(value) {
-  if (!value) return { name: '', email: '' };
-  const m = value.match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>/);
-  if (m) return { name: m[1].trim(), email: m[2].trim().toLowerCase() };
-  return { name: '', email: value.trim().replace(/[<>]/g, '').toLowerCase() };
-}
-
-export function domainOf(email) {
-  const i = (email || '').lastIndexOf('@');
-  return i >= 0 ? email.slice(i + 1).toLowerCase() : '';
-}
-
-function entropy(s) {
-  const f = {};
-  for (const c of s) f[c] = (f[c] || 0) + 1;
-  let e = 0;
-  for (const k in f) { const p = f[k] / s.length; e -= p * Math.log2(p); }
-  return e;
-}
-
-// Un libellé (partie de domaine ou d'adresse) qui a l'air généré au hasard.
-export function looksRandom(label) {
-  const s = (label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (s.length < 8) return false;
-  const digits = (s.match(/\d/g) || []).length;
-  const vowels = (s.match(/[aeiouy]/g) || []).length;
-  const letters = (s.match(/[a-z]/g) || []).length;
-  const consRun = Math.max(0, ...(s.match(/[bcdfghjklmnpqrstvwxz]+/g) || ['']).map(x => x.length));
-  let score = 0;
-  if (digits >= 2 && letters >= 4) score++;
-  if (letters && vowels / letters < 0.25) score++;
-  if (consRun >= 5) score++;
-  if (s.length >= 14 && entropy(s) > 3.6) score++;
-  if (/\d[a-z]+\d/.test(s)) score++;
-  return score >= 2;
-}
-
-export function domainLooksRandom(domain) {
-  const parts = (domain || '').split('.').filter(Boolean);
-  if (parts.length < 2) return true;
-  return parts.slice(0, -1).some(looksRandom);
 }
 
 // Texte visible d'un HTML (sans DOMParser : utilisable dans un service worker).
@@ -159,27 +109,19 @@ export function filterCriteria(c) {
 
 export function key(c) { return `${c.type}|${c.value.toLowerCase()}`; }
 
-const TYPE_RANK = { from: 3, subject: 2, query: 1, fromname: 0 };
+const TYPE_RANK = { subject: 2, query: 1 };
 export function rank(c) { return TYPE_RANK[c.kind || c.type] ?? 0; }
 
-// Candidats pour un message Gmail (format=full).
+// Candidats pour un message Gmail (format=full) : uniquement des mots (phrase exacte de l'objet ou du corps),
+// jamais l'expéditeur — les spammeurs changent d'adresse et de domaine à chaque envoi, pas de texte.
 export function candidatesFor(msg, userEmail = '') {
   const h = headerMap(msg.payload);
-  const from = parseAddress((h['from'] || [''])[0]);
   const subject = (h['subject'] || [''])[0];
   const local = (userEmail.split('@')[0] || '').toLowerCase();
   const userTokens = [local, ...local.split(/[._+-]/)].filter(t => t.length >= 3);
   const out = [];
   const seen = new Set();
   const add = c => { const k = key(c); if (!seen.has(k)) { seen.add(k); out.push(c); } };
-
-  const dom = domainOf(from.email);
-  const localPart = from.email.split('@')[0] || '';
-  if (dom && !FREEMAIL.has(dom) && !domainLooksRandom(dom)) {
-    add({ type: 'from', value: '@' + dom, label: `Expéditeur du domaine ${dom}` });
-  } else if (dom && FREEMAIL.has(dom) && !looksRandom(localPart)) {
-    add({ type: 'from', value: from.email, label: `Adresse ${from.email}` });
-  }
 
   for (const p of phrasesFromSegments(cleanSegments(subject, userTokens))) {
     add({ type: 'subject', value: p, label: 'Phrase exacte dans l’objet' });
@@ -195,12 +137,6 @@ export function candidatesFor(msg, userEmail = '') {
       add({ type: 'query', value: p, label: 'Phrase exacte dans le mail' });
       n++;
     }
-  }
-
-  // Nom affiché (ex. « Cloud_Storage_Team ») : seulement s'il est propre et assez long.
-  const nameWords = cleanSegments(from.name.replace(/_/g, ' '), userTokens).flat();
-  if (nameWords.length >= 2 && nameWords.join(' ').length >= 10) {
-    add({ type: 'from', kind: 'fromname', value: `"${nameWords.join(' ')}"`, label: 'Nom d’expéditeur affiché' });
   }
 
   return out.slice(0, 8);
