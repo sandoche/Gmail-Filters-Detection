@@ -12,7 +12,8 @@ const store = [
   msg('n1', ['INBOX'], 'Vraie Poste <info@laposte.fr>', 'Votre colis est en attente de récupération au bureau', '<p>vrai</p>'),
   msg('u1', ['SPAM'], 'Bob <qx9z2kk8p@gmail.com>', 'hi', '<p>ok</p>'),
   msg('c1', ['INBOX', 'L_CACA'], 'Promo <promo@crypto-gains.io>', 'Crypto gains', '<p>Get crypto gains now, big dick pills</p>'),
-  msg('c2', ['INBOX'], 'Ami <ami@laposte.net>', 'Moby Dick', '<p>Tu as lu Moby Dick ?</p>')
+  msg('c2', ['INBOX'], 'Ami <ami@laposte.net>', 'Moby Dick', '<p>Tu as lu Moby Dick ?</p>'),
+  msg('p1', ['INBOX'], 'U.S. Disbursement Office <ICU4Fh@icu4fh.pastintel.org.uk>', 'Household Inflation Relief Adjustment notice', '<p>Your family is among the beneficiaries of a direct cash credit</p>')
 ];
 let filtersStore = [
   { id: 'f1', criteria: { query: '"crypto gains"' }, action: { addLabelIds: ['L_CACA'], removeLabelIds: ['INBOX'] } },
@@ -49,6 +50,7 @@ globalThis.fetch = async (url, o = {}) => {
     return J({ messages: store.filter(m => (inc || !m.labelIds.some(l => l === 'SPAM' || l === 'TRASH')) && match(m, q)).map(m => ({ id: m.id })) });
   }
   let r;
+  if (p === 'messages/batchModify') { const b = JSON.parse(o.body); store.filter(m => b.ids.includes(m.id)).forEach(m => m.labelIds.push(...(b.addLabelIds || []))); return J({}); }
   if ((r = p.match(/^messages\/(\w+)$/))) return J(store.find(m => m.id === r[1]));
   if ((r = p.match(/^threads\/(\w+)$/))) return J({ id: r[1], messages: store.filter(m => m.threadId === r[1]) });
   if ((r = p.match(/^messages\/(\w+)\/trash$/))) { store.find(m => m.id === r[1]).labelIds = ['TRASH']; return J({}); }
@@ -120,6 +122,15 @@ await test('mail ouvert : quels filtres, pourquoi, dangerosité', async () => {
   assert.equal(byMsg.mail.threadId, 't_c1');
 });
 
+await test('mail ouvert : filtres proposés, le mail lui-même ne compte pas comme vrai mail', async () => {
+  const d = await call('mail:propose', { threadId: 't_p1' });
+  assert.ok(d.proposals.length > 0, 'un spam arrivé dans la boîte de réception a des propositions');
+  assert.ok(d.proposals.some(p => p.query.startsWith('subject:"') && /Inflation Relief/.test(p.query)));
+  assert.ok(d.proposals.every(p => p.total === 1 && !/pastintel|Disbursement Office/.test(p.query)), 'que des mots, jamais l’expéditeur');
+  assert.equal(d.claude, false);
+  assert.equal(d.labelName, '###CACA###');
+});
+
 await test('créer, refuser le doublon, supprimer', async () => {
   const c = await call('filter:create', { field: 'query', value: 'moby dick', target: 'Livres', archive: false });
   assert.deepEqual(c.rule.actions, ['🏷️ Livres']);
@@ -160,6 +171,13 @@ await test('tendances : historique gardé, spams lus une seule fois, sources', a
   const onlyCaca = await call('stats:run', { months: 0, source: 'L_CACA', fetch: false });
   assert.equal(onlyCaca.total, 2);
   assert.equal(onlyCaca.unit, 'week');
+});
+
+await test('« J’ai traité » : libellé ###CACA### sur les spams de la carte', async () => {
+  const r = await call('spam:done', { ids: ['c2'] });
+  assert.equal(r.count, 1);
+  assert.equal(r.labelName, '###CACA###');
+  assert.ok(store.find(m => m.id === 'c2').labelIds.includes('L_CACA'));
 });
 
 assert.equal(auths, 1, 'une seule fenêtre de connexion Google');

@@ -29,7 +29,7 @@ function makeValidator(batchIds, spamLabelId) {
       const all = await listIds(query, true, 300);
       const covers = new Set(all.filter(id => batch.has(id)));
       if (!covers.size) return { cand, covers, legit: [], total: all.length, ok: false, reason: 'n’attrape pas ce spam' };
-      const outside = await listIds(query, false, 40);
+      const outside = (await listIds(query, false, 40)).filter(id => !batch.has(id));   // le mail visé lui-même ne compte pas
       const legit = [];
       for (const info of await pool(outside, 4, labelsOf)) {
         if (spamLabelId && info.labelIds.includes(spamLabelId)) continue;
@@ -156,6 +156,47 @@ export async function analyzeSpam(post) {
     claudeUsed: s.claudeMode === 'fallback' && !!s.anthropicKey,
     settings: { archive: s.archive, trashAfter: s.trashAfter, applyExisting: s.applyExisting }
   };
+}
+
+// ---------- Mail ouvert ----------
+// Mêmes critères que pour le dossier Spam, testés sur le dernier message du fil : n'attrape que des spams, aucun vrai mail.
+// Claude : seulement en secours (clé renseignée, mode « Claude en secours »), si aucune phrase locale n'est sûre.
+export async function proposeForMail({ threadId }, post) {
+  const s = await settings();
+  const profile = await api('profile');
+  const t = await api(`threads/${threadId}`, { params: { format: 'full' } });
+  const m = (t.messages || []).at(-1);
+  if (!m) throw new Error('Fil vide ou introuvable.');
+  const spamLabel = await findLabel(s.labelName);
+  const validate = makeValidator([m.id], spamLabel && spamLabel.id);
+  const cands = candidatesFor(m, profile.emailAddress);
+  post(`Test de ${cands.length} phrase(s) du mail dans Gmail…`);
+  const results = await pool(cands, 3, validate);
+  const claudeOn = !!s.anthropicKey && s.claudeMode !== 'off';
+  let claudeUsed = false, claudeError = '';
+  if (claudeOn && !results.some(r => r.ok)) {
+    post('Claude lit le mail…');
+    claudeUsed = true;
+    try { results.push(...await pool(await claudeCandidates([m], s), 3, validate)); }
+    catch (e) { claudeError = e.message; }
+  }
+  const ok = results.filter(r => r.ok).sort(better);
+  return {
+    proposals: ok.slice(0, 6).map(r => ({ cand: r.cand, query: q(r.cand), total: r.total })),
+    rejected: results.filter(r => !r.ok && r.legit.length).length,
+    claude: claudeOn, claudeUsed, claudeError,
+    labelName: s.labelName, archive: s.archive
+  };
+}
+
+// ---------- « J'ai traité » ----------
+// Le filtre a été collé à la main dans Gmail : les spams de la carte prennent le libellé (ils sortent ainsi de l'analyse).
+export async function markDone({ ids }, post) {
+  const s = await settings();
+  post(`Libellé ${s.labelName}…`);
+  const labelId = await ensureLabel(s.labelName);
+  await api('messages/batchModify', { method: 'POST', body: { ids, addLabelIds: [labelId] } });
+  return { count: ids.length, labelName: s.labelName };
 }
 
 // ---------- Application ----------

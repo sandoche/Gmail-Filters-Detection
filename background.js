@@ -1,6 +1,6 @@
 // Service worker : reçoit les demandes du panneau (content.js) et les confie à spam.js / filters.js.
 import { log, logError } from './gmail-api.js';
-import { analyzeSpam, applySpam } from './spam.js';
+import { analyzeSpam, applySpam, proposeForMail, markDone } from './spam.js';
 import * as filters from './filters.js';
 import { runStats, claudeStats } from './stats.js';
 
@@ -11,6 +11,7 @@ const COMMANDS = {
     await filters.learnCreated(r.report.map(x => x.created), { id: r.labelId, name: r.labelName });
     return r;
   },
+  'spam:done': markDone,
   'filters:status': async (_, post) => { await filters.getIndex(post); return filters.status(); },
   'filters:reload': filters.reload,
   'filters:backup': filters.backup,
@@ -18,6 +19,7 @@ const COMMANDS = {
   'mail:analyze': filters.analyzeMail,
   'mail:explainLabel': filters.explainLabel,
   'mail:claude': filters.claudeExplain,
+  'mail:propose': proposeForMail,
   'filter:test': filters.testCriterion,
   'filter:create': filters.createFilter,
   'filter:delete': filters.deleteFilter,

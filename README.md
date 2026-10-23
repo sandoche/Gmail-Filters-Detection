@@ -28,6 +28,12 @@ Ouvre un mail, clique sur **Filtres** (en bas à droite) :
 - **Supprimer ce filtre** (avec confirmation) ou **créer un filtre** depuis une phrase sélectionnée dans le mail, avec un bouton **Tester** qui compte les vrais mails qu'il attraperait ;
 - **Expliquer avec Claude** (facultatif) : une explication en clair, qui signale les filtres trop larges.
 
+### Ce mail : proposer un filtre
+
+![Proposer un filtre pour le mail ouvert](docs/screenshots/proposer.jpg)
+
+**✦ Proposer un filtre** découpe le mail ouvert en phrases (objet et texte) et les teste dans ta boîte : seules restent celles qui attrapent ce spam et **aucun vrai mail**, la plus utile en premier. Chaque phrase se **copie** en un clic, prête à coller dans Gmail (⋮ → *Filtrer les messages similaires* → « Contient les mots ») ; **Tout copier en OR** les réunit en un seul filtre.
+
 ### Dangerosité et pistage
 
 ![Dangerosité et pistage](docs/screenshots/pistage.jpg)
@@ -39,10 +45,13 @@ Ouvre un mail, clique sur **Filtres** (en bas à droite) :
 
 ![Onglet « Spams »](docs/screenshots/spams.jpg)
 
-- chaque spam avec sa **note de danger**, et son **aperçu** à droite (scripts, liens et images distantes désactivés ; les images peuvent être affichées sur demande, les pixels de suivi restent retirés) ;
+- chaque spam avec sa **note de danger** ; un clic l'**affiche dans Gmail**, derrière le panneau ;
 - des **filtres proposés**, chacun testé dans ta vraie boîte pour attraper ce spam et **0 mail légitime** : uniquement des **mots** (phrase exacte de l'objet ou du corps), jamais l'expéditeur — les spammeurs changent d'adresse à chaque envoi, pas de texte. Si rien de sûr n'est trouvé, Claude peut en proposer (facultatif) ;
 - **plusieurs propositions par spam**, la meilleure en premier : celle qui attrape le plus de spams déjà reçus, puis la plus courte (une phrase courte attrape aussi les variantes de la campagne). Les filtres sur l'objet sont des phrases exactes : `subject:"…"` ;
-- **un par un** (« Créer ce filtre » sur chaque carte) ou tous les cochés d'un coup : filtres créés (libellé `###CACA###` + archivage par défaut), spams traités mis à la corbeille (récupérables 30 jours).
+- **Copier** copie la phrase et ouvre le spam dans Gmail : ⋮ → *Filtrer les messages similaires* → vider « De » (l'adresse du spammeur change à chaque envoi) → coller dans « Contient les mots » → libellé `###CACA###`. **Copier les N en OR** réunit les phrases cochées en un seul filtre ;
+- **J'ai traité** pose le libellé `###CACA###` sur les spams de la carte, la retire de la liste et ouvre le spam suivant dans Gmail. Les spams déjà libellés sont ignorés aux analyses suivantes.
+
+Pourquoi copier plutôt que créer le filtre directement ? L'API Gmail refuse toute création au-delà de **1 000 filtres** par compte, alors que l'interface de Gmail en accepte davantage — et la requête interne qu'utilise l'interface est protégée contre les scripts.
 
 ### Simplifier mes filtres
 
@@ -59,7 +68,7 @@ Ouvre un mail, clique sur **Filtres** (en bas à droite) :
 ![Onglet « Tendances »](docs/screenshots/tendances.jpg)
 
 - sources : dossier Spam, libellé des filtres (`###CACA###`) et les libellés choisis dans les options (`scam` par défaut) — un bouton par source pour voir ses vagues à part ;
-- **historique gardé** : chaque spam lu reste dans les statistiques même après que Gmail l'a supprimé (Spam et Corbeille se vident au bout de 30 jours) ; les spams traités depuis l'onglet Spams y sont notés avant d'aller à la corbeille. Périodes de 3 mois à tout l'historique (au-delà de 2 ans, un point par mois) ;
+- **historique gardé** : chaque spam lu reste dans les statistiques même après que Gmail l'a supprimé (Spam et Corbeille se vident au bout de 30 jours) ; les spams marqués « J'ai traité » gardent le libellé `###CACA###`, qui fait partie des sources. Périodes de 3 mois à tout l'historique (au-delà de 2 ans, un point par mois) ;
 - spams par semaine ou par mois, tendance, **vagues** et le domaine qui les explique ;
 - **points communs** : ce qui revient dans au moins un quart des spams ;
 - **adresse visée** : Gmail ignore les points et le « + » (pour `jeandupont@gmail.com`, les adresses `jean.dupont@gmail.com` et `jeandupont+shop@gmail.com` arrivent dans la même boîte), mais pas les bases de données qui ont fuité — **une écriture différente désigne la liste d'origine**. Avec un service d'alias (Firefox Relay…), chaque alias n'a été donné qu'à un site : **l'alias visé désigne le site qui a fuité** ;
@@ -140,7 +149,7 @@ Node 20+, aucune dépendance. Trois suites : le moteur d'analyse des spams, le c
 | `background.js` | aiguillage des demandes du panneau vers les modules |
 | `gmail-api.js` | connexion Google (`launchWebAuthFlow`), API Gmail, API Claude |
 | `filters.js` | index des filtres (cache), « pourquoi ce filtre ? », créer / supprimer, simplification |
-| `spam.js` | dossier Spam : dangerosité, aperçu, filtres proposés, création |
+| `spam.js` | dossier Spam : dangerosité, filtres proposés (dossier Spam ou mail ouvert), « J'ai traité » |
 | `stats.js` | tendances des spams (en-têtes lus une seule fois, cache) |
 | `analyzer.js` | critères de filtre candidats pour un spam |
 | `lib/gfm-*.js` | code porté de l'ancien add-on Apps Script : requêtes Gmail, texte, correspondance, indicateur spam, index des filtres, tendances |

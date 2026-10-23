@@ -86,10 +86,6 @@
     nav button { border: 0; background: none; padding: 10px 14px; color: var(--muted); font-weight: 500; border-bottom: 3px solid transparent; }
     nav button.on { color: var(--primary); border-bottom-color: var(--primary); }
     .body { flex: 1; overflow: auto; padding: 16px 20px 24px; }
-    .split { display: grid; grid-template-columns: minmax(380px, 440px) 1fr; height: 100%; }
-    .split > .list { overflow: auto; padding: 16px 20px 24px; border-right: 1px solid var(--line); }
-    .split > .preview { overflow: hidden; display: flex; flex-direction: column; background: var(--soft); }
-    .body.flush { padding: 0; overflow: hidden; }
     footer { border-top: 1px solid var(--line); padding: 12px 20px; display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
     footer .hint { flex: 1; color: var(--muted); font-size: 12px; }
     .btn { height: 36px; padding: 0 16px; border-radius: 18px; border: 1px solid #747775; background: none; color: var(--primary); font-weight: 500; }
@@ -154,10 +150,6 @@
     input[type=checkbox], input[type=radio] { accent-color: var(--primary); width: 16px; height: 16px; margin: 0; }
     details > summary { cursor: pointer; color: var(--primary); font-size: 13px; font-weight: 500; list-style: none; margin-top: 8px; }
     details > summary::-webkit-details-marker { display: none; }
-    .pv-head { padding: 16px 20px; background: var(--surface); border-bottom: 1px solid var(--line); }
-    .pv-head h3 { font: 400 18px/1.35 "Google Sans", Roboto, Arial, sans-serif; margin: 0 0 6px; }
-    .pv-frame { flex: 1; border: 0; width: 100%; background: #fff; }
-    .pv-text { flex: 1; overflow: auto; padding: 16px 20px; white-space: pre-wrap; background: #fff; font-size: 13px; }
     .choice { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; border-radius: 8px; font-size: 13px; cursor: pointer; }
     .choice:hover { background: var(--soft); }
     .choice.reco { background: var(--green-soft); }
@@ -195,7 +187,7 @@
   const S = {
     tab: 'mail',
     status: null, statusError: '',
-    mail: { key: '', loading: false, progress: '', error: '', data: null, explain: {}, claude: null, create: null, confirm: '' },
+    mail: { key: '', loading: false, progress: '', error: '', data: null, explain: {}, claude: null, create: null, confirm: '', propose: null },
     spam: { loading: false, progress: '', error: '', data: null, sel: '', edits: {}, alt: {}, done: {}, off: new Set(), opts: null, busy: '', notice: null, images: false },
     simp: { loading: false, progress: '', error: '', plan: null, dupOff: new Set(), choice: {}, tests: {}, mergeOn: new Set(), report: null, backupDone: false },
     stats: { months: 12, source: 'all', loading: false, progress: '', error: '', data: null, claude: null }
@@ -234,8 +226,7 @@
 
   function render() {
     root.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === S.tab));
-    drawer.classList.toggle('wide', (S.tab === 'spam' && !!S.spam.data) || (S.tab === 'stats' && !!S.stats.data));
-    body.classList.toggle('flush', S.tab === 'spam' && !!S.spam.data);
+    drawer.classList.toggle('wide', S.tab === 'stats' && !!S.stats.data);
     footer.hidden = true;
     footer.innerHTML = '';
     if (S.tab === 'mail') renderMail();
@@ -268,7 +259,7 @@
     const key = ctx ? (ctx.threadId || ctx.messageId) : '';
     if (!ctx) { S.mail = { ...S.mail, key: '', data: null, error: '', loading: false }; render(); return; }
     if (!force && key === S.mail.key && (S.mail.data || S.mail.loading)) return;
-    S.mail = { key, loading: true, progress: 'Lecture du mail…', error: '', data: null, explain: {}, claude: null, create: null, confirm: '' };
+    S.mail = { key, loading: true, progress: 'Lecture du mail…', error: '', data: null, explain: {}, claude: null, create: null, confirm: '', propose: S.mail.key === key ? S.mail.propose : null };
     render();
     try {
       const data = await call('mail:analyze', ctx, t => { S.mail.progress = t; if (S.tab === 'mail') render(); });
@@ -298,6 +289,26 @@
         : `<button class="btn small" data-act="del" data-id="${esc(r.id)}">Supprimer ce filtre</button>`}
       </div>
     </div>`;
+  }
+
+  // Filtres proposés pour le mail ouvert : phrases testées dans la boîte (aucun vrai mail attrapé), à copier dans Gmail
+  // (au-delà de 1 000 filtres, l'API refuse d'en créer ; l'interface de Gmail, non).
+  function proposeBlock() {
+    const p = S.mail.propose;
+    if (!p) return `<div class="row" style="margin-bottom:10px"><button class="btn tonal" data-act="propose">✦ Proposer un filtre</button><span class="small muted grow">phrases de ce mail testées dans ta boîte : aucun vrai mail attrapé</span></div>`;
+    if (p.loading) return `<div class="claude muted">${esc(p.progress || 'Recherche…')}</div>`;
+    if (p.error) return `<div class="err">${esc(p.error)}</div><button class="btn small" data-act="propose">Réessayer</button>`;
+    const d = p.data;
+    const copyBtn = (i, text) => `<button class="btn small ${i === 'all' ? 'tonal' : 'filled'}" data-act="propose-copy" data-i="${i}">${p.copied === i ? '✓ Copié' : text}</button>`;
+    let html = d.proposals.length ? `<div class="small muted" style="margin-bottom:8px">Copie une phrase, puis dans Gmail : ⋮ → <b>Filtrer les messages similaires</b> → vide « De », colle dans <b>« Contient les mots »</b> → libellé <b>${esc(d.labelName)}</b>.</div>` : '';
+    html += d.proposals.map((x, i) => `<div class="card">
+      <div class="row"><code class="crit grow">${esc(x.query)}</code>${x.cand.byClaude ? '<span class="chip">✦ Claude</span>' : ''}</div>
+      <div class="row" style="margin-top:6px"><span class="small muted grow">${esc(x.cand.label || '')} · attrape ${plural(x.total, 'mail')} déjà reçu${x.total > 1 ? 's' : ''} (spam, corbeille, libellés) · 0 vrai mail</span>${copyBtn(i, 'Copier')}</div>
+    </div>`).join('');
+    if (d.proposals.length > 1) html += `<div class="row" style="margin-bottom:10px"><span class="small muted grow">ou toutes d’un coup, réunies par OR (un seul filtre)</span>${copyBtn('all', 'Tout copier en OR')}</div>`;
+    if (!d.proposals.length) html += `<div class="note">Aucune phrase sûre : chacune attraperait aussi de vrais mails${d.rejected ? ` (${plural(d.rejected, 'phrase')} écartée${d.rejected > 1 ? 's' : ''})` : ''}. Sélectionne une phrase dans le mail et utilise le formulaire ci-dessous.</div>`;
+    if (d.claudeError) html += `<div class="err">Claude : ${esc(d.claudeError)}</div>`;
+    return html;
   }
 
   function createForm() {
@@ -404,7 +415,7 @@
     else if (m.claude.error) html += `<div class="err">${esc(m.claude.error)}</div>`;
     else html += `<div class="claude">${esc(m.claude.text)}</div>`;
 
-    html += `<h2>Créer un filtre</h2>${createForm()}`;
+    html += `<h2>Créer un filtre</h2>${proposeBlock()}${createForm()}`;
     body.innerHTML = html;
   }
 
@@ -434,42 +445,12 @@
     </div>`;
   }
 
-  // HTML du spam rendu inerte : ni script, ni formulaire, ni lien cliquable, ni ressource distante (sauf choix explicite).
-  // Le cadre n'a pas allow-scripts : même un script oublié ici ne s'exécuterait pas.
-  function safeDoc(html, images) {
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    doc.querySelectorAll('script, iframe, frame, object, embed, form, base, meta, link, noscript').forEach(n => n.remove());
-    doc.querySelectorAll('*').forEach(el => {
-      for (const a of [...el.attributes]) if (/^on/i.test(a.name) || /^\s*javascript:/i.test(a.value)) el.removeAttribute(a.name);
-    });
-    doc.querySelectorAll('a[href]').forEach(a => { a.title = 'Lien : ' + a.getAttribute('href'); a.removeAttribute('href'); a.style.textDecoration = 'underline'; });
-    // Pixels de suivi : retirés même quand les images sont affichées.
-    let trackers = 0;
-    const reason = window.__gfmTracking && window.__gfmTracking.trackerReason;
-    if (reason) doc.querySelectorAll('img[src]').forEach(img => { if (reason(img.getAttribute('src'), img)) { img.remove(); trackers++; } });
-    S.spam.trackers = trackers;
-    const csp = doc.createElement('meta');
-    csp.httpEquiv = 'Content-Security-Policy';
-    csp.content = `default-src 'none'; style-src 'unsafe-inline'; font-src data:; img-src data:${images ? ' https: http:' : ''}`;
-    doc.head.prepend(csp);
-    return '<!doctype html>' + doc.documentElement.outerHTML;
-  }
-
-  function previewPane() {
-    const v = S.spam.data.mails[S.spam.sel];
-    if (!v) return `<div class="empty">Choisis un spam à gauche pour le voir.</div>`;
-    const who = nameOf(v.from);
-    const openUrl = `${gmailBase()}#spam/${v.threadId}`;
-    return `<div class="pv-head">
-        <h3>${esc(v.subject || '(sans objet)')}</h3>
-        <div class="small muted">${esc(who.name)} &lt;${esc(who.email)}&gt; · ${esc(fmtDate(v.date))}</div>
-        <div style="margin-top:12px">${dangerBlock(v.danger, false)}</div>
-        <div class="row small">
-          <label class="check"><input type="checkbox" data-act="images" ${S.spam.images ? 'checked' : ''}> Afficher les images distantes <span class="muted">(préviennent l’expéditeur que tu as ouvert le mail)</span></label>
-          <span id="pv-trackers"></span><span class="grow"></span><a href="${esc(openUrl)}" target="_blank" rel="noopener">Ouvrir dans Gmail ↗</a>
-        </div>
-      </div>
-      ${v.html ? `<iframe class="pv-frame" sandbox="allow-same-origin" referrerpolicy="no-referrer" title="Aperçu du spam"></iframe>` : `<div class="pv-text">${esc(v.text || v.snippet)}</div>`}`;
+  // Affiche le spam dans Gmail lui-même (derrière le panneau) : ⋮ → « Filtrer les messages similaires » y est à portée.
+  function showInGmail(id) {
+    const v = S.spam.data.mails[id];
+    if (!v) return;
+    S.spam.sel = id;
+    location.hash = `#spam/${v.threadId}`;
   }
 
   function renderSpam() {
@@ -480,38 +461,32 @@
       body.innerHTML = `<div class="empty"><div class="big">🛡️</div><b>Dossier Spam</b><br>Dangerosité de chaque spam, et filtres proposés pour qu’ils n’y arrivent plus — testés pour n’attraper aucun vrai mail.<div style="margin-top:20px"><button class="btn filled" data-act="spam-run">Analyser le dossier Spam</button></div></div>`;
       return;
     }
-    const d = sp.data, o = sp.opts;
+    const d = sp.data;
     const count = Object.keys(d.mails).length;
     if (!count) { body.innerHTML = `<div class="empty"><div class="big">✨</div><b>Rien à traiter</b><br>${d.total} mail(s) dans le Spam, ${d.skipped} déjà en ${esc(d.labelName)}.</div>`; return; }
 
-    let list = `<div class="row small muted" style="margin-bottom:12px">${plural(count, 'spam')} à traiter · ${d.skipped} déjà en ${esc(d.labelName)} ignoré(s)</div>
-      <details class="card soft" style="padding:8px 14px"><summary style="margin:0">Options : libellé <b>${esc(o.labelName)}</b>${o.archive ? ', archivé' : ''}${o.trashAfter ? ', spams à la corbeille' : ''}</summary>
-        <div style="display:grid;gap:8px;margin-top:10px">
-          <label class="check">Libellé <input type="text" data-bind="opts.labelName" value="${esc(o.labelName)}"></label>
-          <label class="check"><input type="checkbox" data-bind="opts.archive" ${o.archive ? 'checked' : ''}> Ne pas afficher dans la boîte de réception</label>
-          <label class="check"><input type="checkbox" data-bind="opts.trashAfter" ${o.trashAfter ? 'checked' : ''}> Mettre à la corbeille les spams traités</label>
-          <label class="check"><input type="checkbox" data-bind="opts.applyExisting" ${o.applyExisting ? 'checked' : ''}> Appliquer aussi aux conversations existantes</label>
-        </div></details>`;
+    let list = `<div class="row small muted" style="margin-bottom:12px">${plural(count, 'spam')} à traiter · ${d.skipped} déjà en ${esc(d.labelName)} ignoré(s)</div>`;
     if (sp.notice) list += `<div class="${sp.notice.ok ? 'good' : 'err'}">${esc(sp.notice.text)}</div>`;
     if (d.proposals.length) list += `<h2>Filtres proposés <span class="count">${d.proposals.length} · 0 mail légitime chacun</span></h2>
-      <div class="desc">Le premier choix attrape le plus de spams déjà reçus ; une phrase courte attrape aussi les variantes de la campagne.</div>`;
+      <div class="desc">Le premier choix attrape le plus de spams déjà reçus ; une phrase courte attrape aussi les variantes de la campagne.
+        <b>Copier</b> copie la phrase et affiche le spam dans Gmail : ⋮ → <b>Filtrer les messages similaires</b> → vide « De », colle dans <b>« Contient les mots »</b> → libellé <b>${esc(d.labelName)}</b>.</div>`;
     for (const p of d.proposals) {
-      const done = sp.done[p.pid];
-      const off = sp.off.has(p.pid) || !!done;
+      const off = sp.off.has(p.pid);
       const cur = current(p);
       const kindOf = c => c.type === 'subject' ? 'Objet' : 'Texte';
       const reach = a => `${plural(a.total, 'spam')} déjà reçu${a.total > 1 ? 's' : ''}`;
       list += `<div class="card ${off ? 'off' : ''}">
-        <div class="row"><input type="checkbox" data-act="pick" data-pid="${p.pid}" ${off ? '' : 'checked'} ${done ? 'disabled' : ''} title="Inclure dans « Créer les filtres »">
+        <div class="row"><input type="checkbox" data-act="pick" data-pid="${p.pid}" ${off ? '' : 'checked'} title="Inclure dans « Tout copier en OR »">
           <span class="chip blue">${kindOf(cur.cand)}</span>${cur.cand.byClaude ? '<span class="chip warn">✦ Claude</span>' : ''}<span class="chip ok">${reach(cur)}</span><span class="grow"></span>
           <a class="small" href="${esc(searchUrl(cur.query))}" target="_blank" rel="noopener">Tester dans Gmail ↗</a></div>
-        <input type="text" class="crit-edit" style="margin:8px 0 4px" data-edit="${p.pid}" value="${esc(sp.edits[p.pid] ?? cur.cand.value)}" ${done ? 'disabled' : ''} title="Modifiable : une phrase modifiée est re-testée avant la création">
-        ${p.alts.length > 1 && !done ? `<details style="margin:2px 0 6px" ${sp.alt[p.pid] !== undefined ? 'open' : ''}><summary>Choisir parmi ${p.alts.length} propositions</summary>
+        <input type="text" class="crit-edit" style="margin:8px 0 4px" data-edit="${p.pid}" value="${esc(sp.edits[p.pid] ?? cur.cand.value)}" title="Modifiable : teste une phrase modifiée avec « Tester dans Gmail »">
+        ${p.alts.length > 1 ? `<details style="margin:2px 0 6px" ${sp.alt[p.pid] !== undefined ? 'open' : ''}><summary>Choisir parmi ${p.alts.length} propositions</summary>
           ${p.alts.map((a, i) => `<label class="choice"><input type="radio" name="alt-${p.pid}" data-act="alt" data-pid="${p.pid}" value="${i}" ${(sp.alt[p.pid] || 0) === i ? 'checked' : ''}>
             <span class="grow"><span class="chip">${kindOf(a.cand)}</span> <code>${esc(a.cand.value)}</code><br><span class="small muted">${reach(a)} · 0 vrai mail</span></span></label>`).join('')}</details>` : ''}
         ${p.coverIds.slice(0, 3).map(mailRow).join('')}${p.coverIds.length > 3 ? `<div class="small muted" style="padding:2px 10px">… et ${p.coverIds.length - 3} autre${p.coverIds.length > 4 ? 's' : ''} spam${p.coverIds.length > 4 ? 's' : ''}</div>` : ''}
-        <div class="row" style="margin-top:8px"><span class="grow small ${done && !done.ok ? '' : 'muted'}" ${done && !done.ok ? 'style="color:var(--red)"' : ''}>${done ? (done.ok ? '✓ ' : '✗ ') + esc(done.msg) : ''}</span>
-          ${done && done.ok ? '' : `<button class="btn small filled" data-act="spam-one" data-pid="${p.pid}" ${sp.busy ? 'disabled' : ''}>Créer ce filtre</button>`}</div>
+        <div class="row" style="margin-top:8px"><code class="small grow">${esc(spamCrit(p))}</code>
+          <button class="btn small filled" data-act="spam-copy" data-pid="${p.pid}">${sp.copied === p.pid ? '✓ Copié' : 'Copier'}</button>
+          <button class="btn small" data-act="spam-done" data-pid="${p.pid}" ${sp.busy ? 'disabled' : ''} title="Le filtre est collé dans Gmail : libellé ${esc(d.labelName)} sur ${p.coverIds.length > 1 ? 'ces spams' : 'ce spam'}, puis spam suivant">${sp.busy === p.pid ? '…' : 'J’ai traité'}</button></div>
       </div>`;
     }
     if (d.uncovered.length) {
@@ -520,52 +495,26 @@
     }
     if (d.claudeError) list += `<div class="err">Claude : ${esc(d.claudeError)}</div>`;
 
-    const scroll = root.querySelector('.split > .list');
-    const keep = scroll ? scroll.scrollTop : 0;
-    body.innerHTML = `<div class="split"><div class="list">${list}</div><div class="preview">${previewPane()}</div></div>`;
-    root.querySelector('.split > .list').scrollTop = keep;      // on reste au même endroit après « Créer ce filtre »
-    fillPreview();
-    const n = toCreate().length;
-    setFooter(`<span class="hint">${sp.busy ? esc(sp.busy) : 'Rien n’est créé tant que tu n’as pas validé.'}</span>
-      <button class="btn" data-act="spam-run" ${sp.busy ? 'disabled' : ''}>Relancer l’analyse</button>
-      <button class="btn filled" data-act="spam-apply" ${n && !sp.busy ? '' : 'disabled'}>Créer ${n > 1 ? `les ${n} filtres` : n ? 'le filtre coché' : 'les filtres'}</button>`);
+    const keep = body.scrollTop;
+    body.innerHTML = list;
+    body.scrollTop = keep;      // on reste au même endroit après « Copier »
+    const n = picked().length;
+    setFooter(`<span class="hint" title="Au-delà de 1 000 filtres, l’API Gmail refuse d’en créer ; l’interface de Gmail, non.">À coller dans Gmail.</span>
+      <button class="btn" data-act="spam-run">Relancer l’analyse</button>
+      <button class="btn filled" data-act="spam-copy-all" ${n ? '' : 'disabled'}>${sp.copied === 'all' ? '✓ Copié' : n > 1 ? `Copier les ${n} en OR` : 'Copier la phrase cochée'}</button>`);
   }
 
-  // Choix en cours d'une carte (le premier = celui qui attrape le plus de spams déjà reçus)
+  // Choix en cours d'une carte (le premier = celui qui attrape le plus de spams déjà reçus), phrase modifiée comprise
   const current = p => p.alts[S.spam.alt[p.pid] || 0];
-  const toCreate = () => S.spam.data.proposals.filter(p => !S.spam.off.has(p.pid) && !(S.spam.done[p.pid] && S.spam.done[p.pid].ok));
-
-  function fillPreview() {
-    const f = root.querySelector('.pv-frame');
-    const v = S.spam.data && S.spam.data.mails[S.spam.sel];
-    if (!f || !v || !v.html) return;
-    f.srcdoc = safeDoc(v.html, S.spam.images);
-    const t = root.querySelector('#pv-trackers');
-    if (t) t.innerHTML = S.spam.trackers ? `<span class="chip ok">🛡 ${plural(S.spam.trackers, 'pixel')} de suivi retiré${S.spam.trackers > 1 ? 's' : ''}</span>` : '';
+  const picked = () => S.spam.data.proposals.filter(p => !S.spam.off.has(p.pid));
+  function spamCrit(p) {
+    const c = current(p).cand;
+    const v = String(S.spam.edits[p.pid] ?? c.value).trim().replace(/^"|"$/g, '');
+    return c.type === 'subject' ? `subject:"${v}"` : `"${v}"`;
   }
-
-  // Crée les filtres des cartes données (une seule avec « Créer ce filtre », toutes celles cochées sinon) ;
-  // chaque carte affiche ensuite son résultat et la liste reste en place.
-  async function applySpam(cards) {
-    const sp = S.spam;
-    const items = cards.map(p => {
-      const cur = current(p);
-      const value = String(sp.edits[p.pid] ?? cur.cand.value).trim().replace(/^"|"$/g, '');
-      return { pid: p.pid, proposal: { cand: { ...cur.cand, value }, edited: value !== cur.cand.value, coverIds: p.coverIds } };
-    }).filter(x => x.proposal.cand.value);
-    if (!items.length) return;
-    sp.busy = 'Création…';
-    sp.notice = null;
-    render();
-    try {
-      const r = await call('spam:apply', { proposals: items.map(x => x.proposal), options: sp.opts }, t => { sp.busy = t; if (S.tab === 'spam') render(); });
-      r.report.forEach((x, i) => { sp.done[items[i].pid] = x; });
-      const okN = r.report.filter(x => x.ok).length;
-      sp.notice = { ok: okN === r.report.length, text: `${plural(okN, 'filtre')} créé${okN > 1 ? 's' : ''}${r.trashed ? ` · ${plural(r.trashed, 'spam')} mis à la corbeille (récupérables 30 jours)` : ''}.` };
-      refreshStatus();
-    } catch (e) { sp.notice = { ok: false, text: e.message }; }
-    sp.busy = '';
-    if (S.tab === 'spam') render();
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); return true; }
+    catch (_) { window.prompt('Copie cette phrase (Ctrl+C) :', text); return false; }
   }
 
   /* ═════════════ onglet « Simplifier » ═════════════ */
@@ -883,6 +832,23 @@
         catch (err) { S.mail.claude = { error: err.message }; }
         if (S.tab === 'mail') render();
         break;
+      case 'propose': {
+        const key = S.mail.key;
+        S.mail.propose = { loading: true, progress: 'Lecture du mail…' }; render();
+        try {
+          const data = await call('mail:propose', { threadId: d.mail.threadId }, t => { if (S.mail.key === key && S.mail.propose) { S.mail.propose.progress = t; if (S.tab === 'mail') render(); } });
+          if (S.mail.key === key) S.mail.propose = { data };
+        } catch (err) { if (S.mail.key === key) S.mail.propose = { error: err.message }; }
+        if (S.tab === 'mail') render();
+        break;
+      }
+      case 'propose-copy': {
+        const p = S.mail.propose, all = p.data.proposals.map(x => x.query);
+        const i = el.dataset.i === 'all' ? 'all' : +el.dataset.i;
+        if (await copyText(i === 'all' ? all.join(' OR ') : all[i])) p.copied = i;
+        render();
+        break;
+      }
       case 'create-open': {
         // des mots plutôt que l'expéditeur : la phrase sélectionnée dans le mail, sinon à saisir
         const sel = String(window.getSelection() || '').trim().replace(/\s+/g, ' ');
@@ -905,11 +871,32 @@
         break;
       }
       case 'spam-run': loadSpam(); break;
-      case 'spam-apply': applySpam(toCreate()); break;
-      case 'spam-one': applySpam(S.spam.data.proposals.filter(p => p.pid === el.dataset.pid)); break;
+      case 'spam-copy': {
+        const p = S.spam.data.proposals.find(x => x.pid === el.dataset.pid);
+        if (await copyText(spamCrit(p))) S.spam.copied = p.pid;
+        showInGmail(p.coverIds[0]);
+        render();
+        break;
+      }
+      case 'spam-done': {
+        const sp = S.spam, i = sp.data.proposals.findIndex(x => x.pid === el.dataset.pid), p = sp.data.proposals[i];
+        sp.busy = p.pid; sp.notice = null; render();
+        try {
+          const r = await call('spam:done', { ids: p.coverIds });
+          sp.data.proposals.splice(i, 1);
+          p.coverIds.forEach(id => delete sp.data.mails[id]);
+          sp.data.skipped += p.coverIds.length;
+          sp.notice = { ok: true, text: `✓ ${plural(r.count, 'spam')} rangé${r.count > 1 ? 's' : ''} dans ${r.labelName}` };
+          const next = sp.data.proposals[i] || sp.data.proposals[0];
+          if (next) showInGmail(next.coverIds[0]);
+        } catch (err) { sp.notice = { ok: false, text: err.message }; }
+        sp.busy = '';
+        if (S.tab === 'spam') render();
+        break;
+      }
+      case 'spam-copy-all': if (await copyText(picked().map(spamCrit).join(' OR '))) S.spam.copied = 'all'; render(); break;
       case 'alt': S.spam.alt[el.dataset.pid] = +el.value; delete S.spam.edits[el.dataset.pid]; render(); break;
-      case 'sel': S.spam.sel = el.dataset.id; render(); break;
-      case 'images': S.spam.images = el.checked; fillPreview(); break;
+      case 'sel': showInGmail(el.dataset.id); render(); break;
       case 'pick': el.checked ? S.spam.off.delete(el.dataset.pid) : S.spam.off.add(el.dataset.pid); render(); break;
       case 'plan': loadPlan(); break;
       case 'stats-run': loadStats(); break;

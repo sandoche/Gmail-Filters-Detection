@@ -28,6 +28,12 @@ Open an email and click **Filtres** (bottom right):
 - **delete this filter** (with confirmation) or **create a filter** from a phrase selected in the email, with a **Test** button that counts the real emails it would catch;
 - **Explain with Claude** (optional): a plain-language explanation that flags filters that are too broad.
 
+### This email: suggest a filter
+
+![Suggest a filter for the open email](docs/screenshots/proposer.jpg)
+
+**✦ Proposer un filtre** splits the open email into phrases (subject and body) and tests them against your mailbox: only those that catch this spam and **no real email** are kept, most useful first. Each phrase is **copied** in one click, ready to paste into Gmail (⋮ → *Filter messages like these* → "Has the words"); **Tout copier en OR** combines them into a single filter.
+
 ### Danger and tracking
 
 ![Danger and tracking](docs/screenshots/pistage.jpg)
@@ -39,10 +45,13 @@ Open an email and click **Filtres** (bottom right):
 
 ![“Spams” tab](docs/screenshots/spams.jpg)
 
-- each spam with its **danger score** and a **preview** on the right (scripts, links and remote images disabled; images can be shown on request, tracking pixels stay removed);
+- each spam with its **danger score**; one click **shows it in Gmail**, behind the panel;
 - **proposed filters**, each tested against your real mailbox to catch that spam and **0 legitimate emails**: **words only** (exact subject or body phrase), never the sender — spammers change address with every send, not their wording. When nothing safe is found, Claude can suggest some (optional);
 - **several proposals per spam**, best first: the one that catches the most spam already received, then the shortest (a short phrase also catches the campaign's variants). Subject filters are exact phrases: `subject:"…"`;
-- **one at a time** ("Créer ce filtre" on each card) or all ticked ones at once: filters are created (label `###CACA###` + archive by default), handled spam goes to the trash (recoverable for 30 days).
+- **Copier** copies the phrase and opens the spam in Gmail: ⋮ → *Filter messages like these* → clear "From" (the spammer's address changes with every send) → paste into "Has the words" → label `###CACA###`. **Copier les N en OR** combines the ticked phrases into a single filter;
+- **J'ai traité** puts the `###CACA###` label on the card's spam, removes the card and opens the next spam in Gmail. Labelled spam is skipped by later analyses.
+
+Why copy instead of creating the filter directly? The Gmail API refuses to create any filter beyond **1,000 per account**, while the Gmail web interface accepts more — and the internal request the web interface uses is protected against scripts.
 
 ### Simplify my filters
 
@@ -59,7 +68,7 @@ Open an email and click **Filtres** (bottom right):
 ![“Tendances” tab](docs/screenshots/tendances.jpg)
 
 - sources: Spam folder, the filter label (`###CACA###`) and the labels chosen in the options (`scam` by default) — one button per source to see its own waves;
-- **history kept**: every spam read stays in the statistics even after Gmail deletes it (Spam and Trash are emptied after 30 days); spam handled from the Spams tab is recorded before going to the trash. Periods from 3 months to the whole history (beyond 2 years, one point per month);
+- **history kept**: every spam read stays in the statistics even after Gmail deletes it (Spam and Trash are emptied after 30 days); spam marked « J'ai traité » keeps the `###CACA###` label, which is one of the sources. Periods from 3 months to the whole history (beyond 2 years, one point per month);
 - spam per week or per month, trend, **waves** and the domain behind each one;
 - **common points**: anything found in at least a quarter of the spam;
 - **address targeted**: Gmail ignores dots and "+" (for `johndoe@gmail.com`, `john.doe@gmail.com` and `johndoe+shop@gmail.com` land in the same inbox), but leaked databases don't — **a different spelling points to the list it came from**. With an alias service (Firefox Relay…), each alias was given to a single site: **the alias targeted points to the site that leaked it**;
@@ -140,7 +149,7 @@ Node 20+, no dependencies. Three suites: the spam-analysis engine, the code port
 | `background.js` | routes panel requests to the modules |
 | `gmail-api.js` | Google sign-in (`launchWebAuthFlow`), Gmail API, Claude API |
 | `filters.js` | filter index (cache), "why this filter?", create / delete, simplification |
-| `spam.js` | Spam folder: danger, preview, proposed filters, creation |
+| `spam.js` | Spam folder: danger, proposed filters (Spam folder or open email), « J'ai traité » |
 | `stats.js` | spam trends (headers read once, cached) |
 | `analyzer.js` | candidate filter criteria for a spam |
 | `lib/gfm-*.js` | code ported from the old Apps Script add-on: Gmail queries, text, matching, spam indicator, filter index, trends |
